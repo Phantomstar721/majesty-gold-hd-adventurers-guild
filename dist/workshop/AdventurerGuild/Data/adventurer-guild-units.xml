@@ -1,0 +1,41 @@
+<Majesty>
+	<Description type="Unit" subType="Building" ID="AGB1" Name="AdventurerGuild1" Description="Adventurers Guild">
+		<Engine version="1">
+			<Info value="BlockGround" />
+			<Info value="BlockFlying" />
+			<Info value="ModifyTerrainTextureOnPlacement" />
+			<Info value="ModifyTerrainHeightOnPlacement" />
+			<CanUse value="HumanPlayer" />
+			<Menu value="2" />
+			<ImageIDBase value="AGB1" />
+			<DefaultSound value="Adventurer_Guild" />
+		</Engine>
+		<Game version="1">
+			<DialogID value="AGP1" />
+			<Cost value="3000" />
+			<Multiplier value="3.0" />
+			<IncomeType value="2" />
+			<IncomeAmount value="100" />
+			<MaxHP value="800" />
+			<SightRange value="225" />
+			<Flags value="HasHPBar" />
+			<Flags value="HasGoldToolTip" />
+			<HelpID value="hAG1" />
+		</Game>
+	</Description>
+	<Description type="Unit" subType="Overlay" ID="AGQ2" Name="Adventurer_Guild_Lair_Tracker" Description="Adventurers Guild combat quest tracker">
+		<Engine version="1">
+			<Info value="Directionless" />
+			<Info value="DontBlock" />
+			<Info value="NotVisibleInISOView" />
+			<Menu value="11" />
+			<ImageIDBase value="MRB2" />
+			<Script type="0" cProc="0" GPLFunction="Adventurer_Guild_Cleanse_Lair_Callback" />
+			<DefaultSound value="0" />
+		</Engine>
+		<Game version="1">
+			<DialogID value="0" />
+			<StackPriority value="1" />
+		</Game>
+	</Description>
+</Majesty>

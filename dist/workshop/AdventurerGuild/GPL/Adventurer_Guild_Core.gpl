@@ -1,0 +1,3627 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+expression #Intent_Going_To_Adventurers_Guild 309
+expression #Intent_Performing_A_Quest 310
+expression #Intent_AG_Royal_Dispatch 311
+expression #Intent_AG_Cleanse_Den 312
+expression #Intent_AG_Monster_Bounty 313
+expression #Intent_AG_Chart_Wilds 314
+expression #Intent_AG_Supply_Run 315
+expression #Intent_AG_Lost_Treasure 316
+expression #Intent_AG_Scout_Lair 317
+expression #Intent_AG_Border_Patrol 318
+expression #Intent_AG_Answer_Call 319
+expression #Intent_AG_Watch_Back 320
+expression #Intent_AG_Caravan_Guard 321
+expression #Intent_AG_Pest_Control 322
+expression #Intent_AG_Field_Testing 323
+expression #Intent_AG_Hold_Line 324
+expression #Intent_AG_Tournament 325
+expression #Intent_AG_Trade_Route 326
+expression #Adventurer_Guild_Offers_Per_Refresh 6
+expression #Adventurer_Guild_Patrol_Min_Distance 600
+
+
+
+
+
+
+function Adventurer_Guild_Chart_Candidate(
+	coordinate PalacePoint,
+	coordinate Frontier,
+	coordinate Extents,
+	integer Percent
+) is coordinate
+declare
+	integer PX, PY, FX, FY, Width, Height, DX, DY, TX, TY;
+	float Scale, AxisScale, SampleScale;
+begin
+	PX = $GetX(PalacePoint);
+	PY = $GetY(PalacePoint);
+	FX = $GetX(Frontier);
+	FY = $GetY(Frontier);
+	Width = $GetX(Extents);
+	Height = $GetY(Extents);
+	if ((Percent < 40) || (Percent > 60))
+		return $MakeCoord(-1, -1);
+	if ((PX < 0) || (PY < 0) || (PX >= Width) || (PY >= Height))
+		return $MakeCoord(-1, -1);
+	if ((FX < 0) || (FY < 0) || (FX >= Width) || (FY >= Height))
+		return $MakeCoord(-1, -1);
+	DX = FX - PX;
+	DY = FY - PY;
+	if ((DX == 0) && (DY == 0))
+		return $MakeCoord(-1, -1);
+
+
+
+	Scale = -1.0;
+	if (DX > 0)
+		Scale = ((Width - 1 - FX) * 1.0) / DX;
+	else if (DX < 0)
+		Scale = (FX * -1.0) / DX;
+	if (DY != 0)
+		begin
+			if (DY > 0)
+				AxisScale = ((Height - 1 - FY) * 1.0) / DY;
+			else
+				AxisScale = (FY * -1.0) / DY;
+			if ((Scale < 0.0) || (AxisScale < Scale))
+				Scale = AxisScale;
+		end
+	if (Scale <= 0.0)
+		return $MakeCoord(-1, -1);
+	SampleScale = Scale * Percent / 100.0;
+	TX = FX + DX * SampleScale;
+	TY = FY + DY * SampleScale;
+	if ((TX < 0) || (TY < 0) || (TX >= Width) || (TY >= Height))
+		return $MakeCoord(-1, -1);
+	if ((TX == FX) && (TY == FY))
+		return $MakeCoord(-1, -1);
+	return $MakeCoord(TX, TY);
+end
+
+
+
+
+function Adventurer_Guild_Chart_Point_In_List(coordinate Point, list Points) is boolean
+declare
+	coordinate Other;
+	integer Index;
+begin
+	Index = 1;
+	while ((Index <= $ListSize(Points)) && (Index <= 16)) do
+		begin
+			Other = $ListMember(Points, Index);
+			if (($GetX(Point) == $GetX(Other)) && ($GetY(Point) == $GetY(Other)))
+				return True;
+			Index += 1;
+		end
+	return False;
+end
+
+
+function Adventurer_Guild_Chart_Arrived(agent Hero, coordinate Point) is boolean
+declare
+begin
+
+
+	return ($DistanceBetweenCoords($LocationOf(Hero), Point) < 15);
+end
+
+
+
+
+
+function Adventurer_Guild_Chart_Unexplored(agent Guild, coordinate Point) is boolean
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	return ($MM_MapFog($GetUnitPlayerNumber(Guild), Point) == 0);
+end
+
+function Adventurer_Guild_Chart_Find_Destination(agent Guild) is coordinate
+declare
+	list Buildings, Palaces, SeenCandidates;
+	agent Palace;
+	coordinate Origin, SearchOrigin, Extents, Frontier, Point;
+	integer Cursor, Attempt, Status, Sample, Player;
+	boolean CanFindPath;
+	float Cost;
+begin
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+	Palaces = $ListTitles(Buildings, "Palace");
+	if ($ListSize(Palaces) == 0)
+		return $MakeCoord(-1, -1);
+	Palace = $ListMember(Palaces, 1);
+	Origin = $LocationOf(Palace);
+	Extents = $GetBoardExtents();
+	Player = $GetUnitPlayerNumber(Guild);
+
+
+
+
+	if ($GetNearestHiddenCoord(Palace, SearchOrigin) == False)
+		return $MakeCoord(-1, -1);
+	Cursor = 0;
+	Attempt = 0;
+	while (Attempt < 8) do
+		begin
+			Attempt += 1;
+
+
+			Status = $MM_MapNextFrontier(Player, SearchOrigin, Cursor, 256, Frontier);
+			if ((Status == -1) || (Status == 2))
+				return $MakeCoord(-1, -1);
+			if (Status == 1)
+				begin
+					Sample = 0;
+					while (Sample < 2) do
+						begin
+							Sample += 1;
+							Point = $Adventurer_Guild_Chart_Candidate(
+								Origin, Frontier, Extents, $RandomNumber(21) + 40);
+							if (($GetX(Point) >= 0) && ($GetY(Point) >= 0))
+								if ($Adventurer_Guild_Chart_Point_In_List(Point, SeenCandidates) == False)
+									begin
+										SeenCandidates << Point;
+										if ($Adventurer_Guild_Chart_Unexplored(Guild, Point))
+											begin
+												CanFindPath = False;
+												Cost = $PathCost($GetEntranceLoc(Guild), Point,
+													"check_buildings", CanFindPath);
+												if (CanFindPath)
+													return Point;
+											end
+									end
+						end
+				end
+		end
+	return $MakeCoord(-1, -1);
+end
+
+
+
+
+
+
+function Adventurer_Guild_Chart_Sync_Head(agent Guild)
+declare
+	integer Key;
+	agent Applicant;
+begin
+	$Adventurer_Guild_Ensure_Quest_State(Guild);
+	Key = 0;
+	if ($ListSize(Guild's "AGChartKeys") > 0)
+		Key = $ListMember(Guild's "AGChartKeys", 1);
+	if ((Key > 0) && (Guild's "AGRowKey" == Key) &&
+		(Guild's "AGGuild" == Guild))
+		return;
+	Applicant = Guild's "AGApplicant";
+	if ($IsValidGamePiece(Applicant))
+		$Adventurer_Guild_Remove_Applicant(Guild, Applicant);
+	Guild's "AGAvailableQuests" -= Guild;
+	Guild's "AGGuild" = $NullAgent();
+	Guild's "AGQuestKind" = 0;
+	Guild's "AGApplicant" = $NullAgent();
+	Guild's "AGClaimant" = $NullAgent();
+	if (Key <= 0)
+		return;
+	Guild's "AGRowKey" = Key;
+	Guild's "AGGuild" = Guild;
+	Guild's "AGQuestKind" = 4;
+	Guild's "AGChartPoint" = $ListMember(Guild's "AGChartPoints", 1);
+	Guild's "AGDestination" = $NullAgent();
+	Guild's "AGDestination2" = $NullAgent();
+	Guild's "AGStage" = 0;
+	Guild's "AGObjectiveComplete" = False;
+	Guild's "AGPaid" = False;
+	Guild's "AGName" = "Chart the Wilds";
+	Guild's "AGGoal" = "Explore uncharted territory";
+	Guild's "AGReward" = 200;
+	Guild's "AGAvailableQuests" << Guild;
+end
+
+function Adventurer_Guild_Chart_Prune(agent Guild)
+declare
+	list Keys, Points;
+	coordinate Point;
+	integer Index;
+	boolean Changed;
+begin
+	Index = 1;
+	Changed = False;
+	while (Index <= $ListSize(Guild's "AGChartKeys")) do
+		begin
+			Point = $ListMember(Guild's "AGChartPoints", Index);
+			if ($Adventurer_Guild_Chart_Unexplored(Guild, Point))
+				begin
+					Keys << $ListMember(Guild's "AGChartKeys", Index);
+					Points << Point;
+				end
+			else
+				Changed = True;
+			Index += 1;
+		end
+	if (Changed)
+		begin
+			Guild's "AGChartKeys" = Keys;
+			Guild's "AGChartPoints" = Points;
+			$Adventurer_Guild_Chart_Sync_Head(Guild);
+			$Adventurer_Guild_Publish_Rows(Guild);
+		end
+end
+
+function Adventurer_Guild_Create_Chart(agent Guild) is boolean
+declare
+	coordinate Point;
+	integer Key;
+begin
+	Point = $Adventurer_Guild_Chart_Find_Destination(Guild);
+	if (($GetX(Point) < 0) || ($GetY(Point) < 0))
+		return False;
+	Key = $Adventurer_Guild_Allocate_Row_Key(Guild);
+	if (Key <= 0)
+		return False;
+	Guild's "AGChartKeys" << Key;
+	Guild's "AGChartPoints" << Point;
+	$Adventurer_Guild_Chart_Sync_Head(Guild);
+	return True;
+end
+
+function Adventurer_Guild_Ensure_Guild_State(agent Guild)
+declare
+begin
+	if ($HasAttribute("AGAvailableQuests", Guild) == False)
+		$AddAttribute(Guild, "AGAvailableQuests", "list");
+
+	if ($HasAttribute("AGActiveQuests", Guild) == False)
+		$AddAttribute(Guild, "AGActiveQuests", "list");
+
+	if ($HasAttribute("AGApplicants", Guild) == False)
+		$AddAttribute(Guild, "AGApplicants", "list");
+
+	if ($HasAttribute("AGRefreshing", Guild) == False)
+		$AddAttribute(Guild, "AGRefreshing", "boolean", False);
+
+	if ($HasAttribute("AGRevision", Guild) == False)
+		$AddAttribute(Guild, "AGRevision", "integer", 0);
+	if ($HasAttribute("AGNextRowKey", Guild) == False)
+		$AddAttribute(Guild, "AGNextRowKey", "integer", 1);
+	if ($HasAttribute("AGUIRowKeys", Guild) == False)
+		$AddAttribute(Guild, "AGUIRowKeys", "list");
+	if ($HasAttribute("AGUIRowKinds", Guild) == False)
+		$AddAttribute(Guild, "AGUIRowKinds", "list");
+	if ($HasAttribute("AGUIRowRewards", Guild) == False)
+		$AddAttribute(Guild, "AGUIRowRewards", "list");
+	if ($HasAttribute("AGUIReady", Guild) == False)
+		$AddAttribute(Guild, "AGUIReady", "boolean", False);
+	if ($HasAttribute("AGChartKeys", Guild) == False)
+		$AddAttribute(Guild, "AGChartKeys", "list");
+	if ($HasAttribute("AGChartPoints", Guild) == False)
+		$AddAttribute(Guild, "AGChartPoints", "list");
+
+	if ($HasAttribute("AGProofOfferVisible", Guild) == False)
+		$AddAttribute(Guild, "AGProofOfferVisible", "boolean", True);
+
+	if ($HasAttribute("AGStateVersion", Guild) == False)
+		$AddAttribute(Guild, "AGStateVersion", "integer", 0);
+	$Adventurer_Guild_Activities_Ensure(Guild);
+end
+
+
+function Adventurer_Guild_Is_Open(agent Guild) is boolean
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	return ($GetAttribute(Guild, #ATTRIB_EmbassyActiveFlag) == 1);
+end
+
+
+function Adventurer_Guild_Ensure_Hero_State(agent Hero)
+declare
+begin
+	if ($HasAttribute("AGPendingGuild", Hero) == False)
+		$AddAttribute(Hero, "AGPendingGuild", "agentref");
+
+	if ($HasAttribute("AGPendingQuest", Hero) == False)
+		$AddAttribute(Hero, "AGPendingQuest", "agentref");
+
+	if ($HasAttribute("AGAcceptedQuest", Hero) == False)
+		$AddAttribute(Hero, "AGAcceptedQuest", "agentref");
+end
+
+
+function Adventurer_Guild_Ensure_Quest_State(agent Quest)
+declare
+begin
+	if ($HasAttribute("AGQuestKind", Quest) == False)
+		$AddAttribute(Quest, "AGQuestKind", "integer", 0);
+	if ($HasAttribute("AGRowKey", Quest) == False)
+		$AddAttribute(Quest, "AGRowKey", "integer", 0);
+	if ($HasAttribute("AGChartPoint", Quest) == False)
+		$AddAttribute(Quest, "AGChartPoint", "coord");
+
+	if ($HasAttribute("AGGuild", Quest) == False)
+		$AddAttribute(Quest, "AGGuild", "agentref");
+
+	if ($HasAttribute("AGDestination", Quest) == False)
+		$AddAttribute(Quest, "AGDestination", "agentref");
+
+	if ($HasAttribute("AGDestination2", Quest) == False)
+		$AddAttribute(Quest, "AGDestination2", "agentref");
+
+	if ($HasAttribute("AGStage", Quest) == False)
+		$AddAttribute(Quest, "AGStage", "integer", 0);
+
+	if ($HasAttribute("AGClaimant", Quest) == False)
+		$AddAttribute(Quest, "AGClaimant", "agentref");
+
+	if ($HasAttribute("AGApplicant", Quest) == False)
+		$AddAttribute(Quest, "AGApplicant", "agentref");
+
+	if ($HasAttribute("AGObjectiveComplete", Quest) == False)
+		$AddAttribute(Quest, "AGObjectiveComplete", "boolean", False);
+
+	if ($HasAttribute("AGPaid", Quest) == False)
+		$AddAttribute(Quest, "AGPaid", "boolean", False);
+
+	if ($HasAttribute("AGName", Quest) == False)
+		$AddAttribute(Quest, "AGName", "string", "Royal Dispatch");
+
+	if ($HasAttribute("AGGoal", Quest) == False)
+		$AddAttribute(Quest, "AGGoal", "string", "Carry royal orders");
+
+	if ($HasAttribute("AGReward", Quest) == False)
+		$AddAttribute(Quest, "AGReward", "integer", 0);
+end
+
+
+function Adventurer_Guild_Allocate_Row_Key(agent Guild) is integer
+declare
+	integer Key;
+begin
+	Key = Guild's "AGNextRowKey";
+	if (Key <= 0)
+		return 0;
+	if (Key == 2147483647)
+		Guild's "AGNextRowKey" = 0;
+	else
+		Guild's "AGNextRowKey" += 1;
+	return Key;
+end
+
+
+
+
+
+function Adventurer_Guild_Publish_Rows(agent Guild)
+declare
+	list Quests, Keys, Kinds, Rewards;
+	agent Quest;
+	integer Key, ChartIndex;
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return;
+	$Adventurer_Guild_Ensure_Guild_State(Guild);
+	Quests = Guild's "AGAvailableQuests";
+	foreach Quest in Quests do
+		if ($ListSize(Keys) < 64)
+			if (Quest != Guild)
+			if ($IsValidGamePiece(Quest))
+				begin
+					$Adventurer_Guild_Ensure_Quest_State(Quest);
+					if ((Quest's "AGGuild" == Guild) &&
+						(Quest's "AGQuestKind" >= 1) && (Quest's "AGQuestKind" <= 8))
+						begin
+							Key = Quest's "AGRowKey";
+							if (Key <= 0)
+								begin
+									Key = $Adventurer_Guild_Allocate_Row_Key(Guild);
+									Quest's "AGRowKey" = Key;
+								end
+							if (Key > 0)
+								begin
+									Keys << Key;
+									Kinds << Quest's "AGQuestKind";
+									Rewards << Quest's "AGReward";
+								end
+						end
+				end
+	ChartIndex = 1;
+	while ((ChartIndex <= $ListSize(Guild's "AGChartKeys")) && ($ListSize(Keys) < 64)) do
+		begin
+			Keys << $ListMember(Guild's "AGChartKeys", ChartIndex);
+			Kinds << 4;
+			Rewards << 200;
+			ChartIndex += 1;
+		end
+	ChartIndex = 1;
+	while ((ChartIndex <= $ListSize(Guild's "AGXKeys")) && ($ListSize(Keys) < 64)) do
+		begin
+			Keys << $ListMember(Guild's "AGXKeys", ChartIndex);
+			Kinds << $ListMember(Guild's "AGXKinds", ChartIndex);
+			Rewards << $ListMember(Guild's "AGXRewards", ChartIndex);
+			ChartIndex += 1;
+		end
+	Guild's "AGUIRowKeys" = Keys;
+	Guild's "AGUIRowKinds" = Kinds;
+	Guild's "AGUIRowRewards" = Rewards;
+	Guild's "AGUIReady" = True;
+	Guild's "AGRevision" += 1;
+end
+
+
+function Adventurer_Guild_Birth(agent ThisAgent)
+declare
+begin
+	$Adventurer_Guild_Ensure_Guild_State(ThisAgent);
+
+
+
+	$NewThread(ThisAgent's "ActiveScript", 500, ThisAgent);
+	$Building_Birth(ThisAgent);
+
+
+
+	$SetAttribute(ThisAgent, #ATTRIB_EmbassyActiveFlag, 0);
+	$Adventurer_Guild_Refresh_Offers(ThisAgent);
+end
+
+
+function Adventurer_Guild_Poll(agent ThisAgent)
+declare
+begin
+	if ($IsValidGamePiece(ThisAgent) == False)
+		return;
+
+	$Adventurer_Guild_Ensure_Guild_State(ThisAgent);
+
+
+	$Adventurer_Guild_Prune_Quest_Lists(ThisAgent);
+
+	if (ThisAgent's "AGUIReady" == False)
+		$Adventurer_Guild_Publish_Rows(ThisAgent);
+end
+
+
+function Adventurer_Guild_Target_In_Use(agent Guild, agent Destination) is boolean
+declare
+	list Quests;
+	agent Quest;
+	agent Owner;
+	boolean TargetInUse;
+begin
+	if ($Adventurer_Guild_Activity_Target_In_Use(Guild, Destination))
+		return True;
+	TargetInUse = False;
+	if ($HasAttribute("AGGuild", Destination))
+		begin
+			Owner = Destination's "AGGuild";
+			if ($IsValidGamePiece(Owner))
+				begin
+					if ($HasAttribute("AGAvailableQuests", Owner))
+						begin
+							Quests = Owner's "AGAvailableQuests";
+							foreach Quest in Quests do
+								if ($IsValidGamePiece(Quest))
+									if ((Quest == Destination) ||
+										(($HasAttribute("AGDestination", Quest)) &&
+										(Quest's "AGDestination" == Destination)))
+										TargetInUse = True;
+						end
+					if ($HasAttribute("AGActiveQuests", Owner))
+						begin
+							Quests = Owner's "AGActiveQuests";
+							foreach Quest in Quests do
+								if ($IsValidGamePiece(Quest))
+									if ((Quest == Destination) ||
+										(($HasAttribute("AGDestination", Quest)) &&
+										(Quest's "AGDestination" == Destination)))
+										TargetInUse = True;
+						end
+				end
+		end
+
+	Quests = Guild's "AGAvailableQuests";
+	foreach Quest in Quests do
+		if ($IsValidGamePiece(Quest))
+			if ((Quest == Destination) ||
+				(($HasAttribute("AGDestination", Quest)) &&
+				(Quest's "AGDestination" == Destination)))
+				TargetInUse = True;
+
+	Quests = Guild's "AGActiveQuests";
+	foreach Quest in Quests do
+		if ($IsValidGamePiece(Quest))
+			if ((Quest == Destination) ||
+				(($HasAttribute("AGDestination", Quest)) &&
+				(Quest's "AGDestination" == Destination)))
+				TargetInUse = True;
+
+	return TargetInUse;
+end
+
+
+function Adventurer_Guild_Destination_Valid(
+	agent Guild,
+	agent Destination
+) is boolean
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	if ($IsValidGamePiece(Destination) == False)
+		return False;
+	if ($IsDead(Destination))
+		return False;
+	if ($UnitsAreSamePlayer(Guild, Destination) == False)
+		return False;
+	return True;
+end
+
+
+function Adventurer_Guild_Lair_Target_Valid(
+	agent Guild,
+	agent Lair
+) is boolean
+
+
+
+
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	if ($IsValidGamePiece(Lair) == False)
+		return False;
+	if ($IsDead(Lair))
+		return False;
+	if (Lair's "type" != "lair")
+		return False;
+	if ($GetPlayerTeamNumber(Guild) == $GetPlayerTeamNumber(Lair))
+		return False;
+	return True;
+end
+
+
+function Adventurer_Guild_Scout_Offer_Valid(agent Guild, agent Lair) is boolean
+
+
+
+declare
+	list SeenLairs;
+begin
+	if ($Adventurer_Guild_Lair_Target_Valid(Guild, Lair) == False)
+		return False;
+	$ListObjects(Guild, "lair", -1, SeenLairs, #NotMyTeam);
+	return ($AgentInList(Lair, SeenLairs) == False);
+end
+
+
+function Adventurer_Guild_Scout_Candidates(agent Guild) is list
+
+
+
+declare
+	list Lairs;
+	list SeenLairs;
+	list Candidates;
+	agent Lair;
+begin
+	$ListObjects(Guild, "lair", -1, Lairs, #NoHiddenMap, #NotMyTeam);
+	$ListObjects(Guild, "lair", -1, SeenLairs, #NotMyTeam);
+	foreach Lair in Lairs do
+		if ($AgentInList(Lair, SeenLairs) == False)
+			if ($Adventurer_Guild_Lair_Target_Valid(Guild, Lair))
+				if ($Adventurer_Guild_Target_In_Use(Guild, Lair) == False)
+					Candidates << Lair;
+	return Candidates;
+end
+
+
+function Adventurer_Guild_Treasure_Target_Valid(agent Guild, agent Chest) is boolean
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	if ($IsValidGamePiece(Chest) == False)
+		return False;
+	if ($IsDead(Chest))
+		return False;
+	if ((Chest's "Type" != "Special_Item") || (Chest's "Title" != "Treasure_Chest"))
+		return False;
+	if ($GetAttribute(Chest, #ATTRIB_HP) <= 0)
+		return False;
+	return ($GetAttribute(Chest, #ATTRIB_Gold) > 0);
+end
+
+
+function Adventurer_Guild_Treasure_Candidates(agent Guild) is list
+declare
+	list Items, SeenItems, Candidates;
+	agent Chest;
+begin
+
+	$ListObjects(Guild, "Special_Item", -1, Items, #NoHiddenMap);
+	$ListObjects(Guild, "Special_Item", -1, SeenItems);
+	foreach Chest in Items do
+		if ($AgentInList(Chest, SeenItems) == False)
+			if ($Adventurer_Guild_Treasure_Target_Valid(Guild, Chest))
+				if ($Adventurer_Guild_Target_In_Use(Guild, Chest) == False)
+					Candidates << Chest;
+	return Candidates;
+end
+
+
+function Adventurer_Guild_Monster_Target_Valid(
+	agent Guild,
+	agent Monster
+) is boolean
+
+
+
+
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	if ($IsValidGamePiece(Monster) == False)
+		return False;
+	if ($IsDead(Monster))
+		return False;
+	if (Monster's "type" != "monster")
+		return False;
+	if ($GetPlayerTeamNumber(Guild) == $GetPlayerTeamNumber(Monster))
+		return False;
+	return True;
+end
+
+
+function Adventurer_Guild_Monster_Was_Zoo_Captured(
+	agent Guild,
+	agent Monster
+) is boolean
+
+
+
+
+
+
+
+declare
+	agent Zoo;
+begin
+	if (($IsValidGamePiece(Guild) == False) ||
+		($IsValidGamePiece(Monster) == False) ||
+		($IsDead(Monster)))
+		return False;
+	if (Monster's "subtype" != "Hooligan")
+		return False;
+	if ((Monster's "type" != "Hidden") &&
+		(Monster's "type" != "Hooligan"))
+		return False;
+
+	Zoo = Monster's "Target";
+	if ($IsValidGamePiece(Zoo) == False)
+		return False;
+	if ((Zoo's "type" != "building") || (Zoo's "title" != "Zoo"))
+		return False;
+	if ($UnitsAreSamePlayer(Guild, Zoo) == False)
+		return False;
+	return True;
+end
+
+
+function Adventurer_Guild_Threat_Rank(agent Monster) is integer
+
+
+
+
+declare
+	integer Experience;
+begin
+	Experience = $GetAttribute(Monster, #ATTRIB_LevelXP);
+
+	if (Experience <= 230)
+		return 1;
+	else if (Experience <= 400)
+		return 2;
+	else if (Experience <= 500)
+		return 3;
+	else if (Experience <= 900)
+		return 4;
+	else if (Experience <= 1500)
+		return 5;
+	else if (Experience <= 2000)
+		return 6;
+	else if (Experience <= 3500)
+		return 7;
+
+	return 8;
+end
+
+
+function Adventurer_Guild_Monster_Bounty_Reward(agent Monster) is integer
+declare
+begin
+	if ($IsValidGamePiece(Monster) == False)
+		return 0;
+	return $Adventurer_Guild_Threat_Rank(Monster) * 100;
+end
+
+
+function Adventurer_Guild_Economy_Building_Valid(
+	agent Guild,
+	agent Building
+) is boolean
+
+
+
+
+
+declare
+begin
+	if ($Adventurer_Guild_Destination_Valid(Guild, Building) == False)
+		return False;
+	if (Building's "type" != "building")
+		return False;
+	if ($GetAttribute(Building, #ATTRIB_FirstStageBuilt) != 1)
+		return False;
+	if ((Building's "title" == "Marketplace") ||
+		(Building's "title" == "Blacksmith") ||
+		(Building's "title" == "Inn"))
+		return True;
+	if ($HasAttribute("EconomyBuilding", Building))
+
+
+
+		return True;
+	return False;
+end
+
+
+function Adventurer_Guild_Supply_Run_Objectives_Valid(
+	agent Guild,
+	agent Quest
+) is boolean
+declare
+	agent Destination1;
+	agent Destination2;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+	if ($HasAttribute("AGDestination2", Quest) == False)
+		return False;
+
+	Destination1 = Quest's "AGDestination";
+	Destination2 = Quest's "AGDestination2";
+	if ($Adventurer_Guild_Economy_Building_Valid(
+		Guild,
+		Destination1
+	) == False)
+		return False;
+	if ($Adventurer_Guild_Economy_Building_Valid(
+		Guild,
+		Destination2
+	) == False)
+		return False;
+	if (Destination1's "title" == Destination2's "title")
+		return False;
+	return True;
+end
+
+
+function Adventurer_Guild_Patrol_Building_Valid(agent Guild, agent Building) is boolean
+declare
+begin
+	if ($Adventurer_Guild_Destination_Valid(Guild, Building) == False)
+		return False;
+	if (Building's "type" != "building")
+		return False;
+	if ($GetAttribute(Building, #ATTRIB_FirstStageBuilt) != 1)
+		return False;
+
+
+	if (Building's "title" == "Palace")
+		return False;
+	return ((Building's "title" == "Guardhouse") ||
+		(Building's "title" == "Ballista_Tower") ||
+		(Building's "title" == "Wizards_Tower") ||
+		(Building's "title" == "Dwarven_Settlement") ||
+		(Building's "subtype" == "Outpost"));
+end
+
+
+function Adventurer_Guild_Patrol_Objectives_Valid(agent Guild, agent Quest) is boolean
+declare
+	agent Destination1, Destination2;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+	if ($HasAttribute("AGDestination2", Quest) == False)
+		return False;
+	Destination1 = Quest's "AGDestination";
+	Destination2 = Quest's "AGDestination2";
+	if ($Adventurer_Guild_Patrol_Building_Valid(Guild, Destination1) == False)
+		return False;
+	if ($Adventurer_Guild_Patrol_Building_Valid(Guild, Destination2) == False)
+		return False;
+	if (Destination1 == Destination2)
+		return False;
+	return ($DistanceBetweenAgents(Destination1, Destination2) >=
+		#Adventurer_Guild_Patrol_Min_Distance);
+end
+
+
+function Adventurer_Guild_Two_Stop_Objectives_Valid(agent Guild, agent Quest) is boolean
+declare
+begin
+	if (Quest's "AGQuestKind" == 8)
+		return $Adventurer_Guild_Patrol_Objectives_Valid(Guild, Quest);
+	return $Adventurer_Guild_Supply_Run_Objectives_Valid(Guild, Quest);
+end
+
+
+function Adventurer_Guild_Patrol_Candidates(agent Guild) is list
+
+
+
+declare
+	list Buildings, Eligible, Candidates;
+	agent Building, Destination1, Destination2;
+	boolean Found;
+begin
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+	foreach Building in Buildings do
+		if ($Adventurer_Guild_Patrol_Building_Valid(Guild, Building))
+			if ($Adventurer_Guild_Target_In_Use(Guild, Building) == False)
+				Eligible << Building;
+	foreach Destination1 in Eligible do
+		begin
+			Found = False;
+			foreach Destination2 in Eligible do
+				if ((Found == False) && (Destination1 != Destination2))
+					if ($DistanceBetweenAgents(Destination1, Destination2) >=
+						#Adventurer_Guild_Patrol_Min_Distance)
+						Found = True;
+			if (Found)
+				Candidates << Destination1;
+		end
+	return Candidates;
+end
+
+
+function Adventurer_Guild_Available_Quest_Valid(
+	agent Guild,
+	agent Quest
+) is boolean
+declare
+	integer Kind;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+	$Adventurer_Guild_Ensure_Quest_State(Quest);
+	if (Quest's "AGGuild" != Guild)
+		return False;
+	Kind = Quest's "AGQuestKind";
+	if ((Kind < 1) || (Kind > 8))
+		return False;
+	if ($IsValidGamePiece(Quest's "AGClaimant"))
+		return False;
+	if ((Quest's "AGObjectiveComplete") || (Quest's "AGPaid"))
+		return False;
+	if (Kind == 4)
+		return ((Quest == Guild) &&
+			$Adventurer_Guild_Chart_Unexplored(Guild, Quest's "AGChartPoint"));
+	if (Kind == 2)
+		return $Adventurer_Guild_Lair_Target_Valid(
+			Guild,
+			Quest's "AGDestination"
+		);
+	if (Kind == 3)
+		return $Adventurer_Guild_Monster_Target_Valid(
+			Guild,
+			Quest's "AGDestination"
+		);
+	if (Kind == 5)
+		return $Adventurer_Guild_Supply_Run_Objectives_Valid(Guild, Quest);
+	if (Kind == 8)
+		return $Adventurer_Guild_Patrol_Objectives_Valid(Guild, Quest);
+	if (Kind == 6)
+		return $Adventurer_Guild_Treasure_Target_Valid(Guild, Quest's "AGDestination");
+	if (Kind == 7)
+		return $Adventurer_Guild_Scout_Offer_Valid(
+			Guild,
+			Quest's "AGDestination"
+		);
+	return $Adventurer_Guild_Destination_Valid(
+		Guild,
+		Quest's "AGDestination"
+	);
+end
+
+
+function Adventurer_Guild_Active_Quest_Valid(
+	agent Guild,
+	agent Quest
+) is boolean
+declare
+	integer Kind;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+	$Adventurer_Guild_Ensure_Quest_State(Quest);
+	if (Quest's "AGGuild" != Guild)
+		return False;
+	Kind = Quest's "AGQuestKind";
+	if ((Kind >= 9) && (Kind <= 16))
+		return $Adventurer_Guild_Activity_Active_Valid(Guild, Quest);
+	if ((Kind < 1) || (Kind > 8))
+		return False;
+	if ($IsValidGamePiece(Quest's "AGClaimant") == False)
+		return False;
+	if (Quest's "AGPaid")
+		return False;
+	if (Kind == 4)
+		return (Quest == Quest's "AGClaimant");
+	if (Kind == 6)
+		begin
+			if (Quest's "AGObjectiveComplete")
+				return True;
+			return $Adventurer_Guild_Treasure_Target_Valid(Guild, Quest's "AGDestination");
+		end
+	if ((Kind == 2) || (Kind == 7))
+		begin
+			if (Quest's "AGObjectiveComplete")
+				return True;
+			return $Adventurer_Guild_Lair_Target_Valid(
+				Guild,
+				Quest's "AGDestination"
+			);
+		end
+	if (Kind == 3)
+		begin
+			if (Quest's "AGObjectiveComplete")
+				return True;
+			if ($Adventurer_Guild_Monster_Target_Valid(
+				Guild,
+				Quest's "AGDestination"
+			))
+				return True;
+			return $Adventurer_Guild_Monster_Was_Zoo_Captured(
+				Guild,
+				Quest's "AGDestination"
+			);
+		end
+	if (Kind == 5)
+		return $Adventurer_Guild_Supply_Run_Objectives_Valid(Guild, Quest);
+	if (Kind == 8)
+		begin
+			if (Quest's "AGObjectiveComplete")
+				return True;
+			return $Adventurer_Guild_Patrol_Objectives_Valid(Guild, Quest);
+		end
+	return $Adventurer_Guild_Destination_Valid(
+		Guild,
+		Quest's "AGDestination"
+	);
+end
+
+
+function Adventurer_Guild_Prune_Quest_Lists(agent Guild)
+
+
+
+
+declare
+	list Available;
+	list KeptAvailable;
+	list Active;
+	list KeptActive;
+	agent Quest;
+	boolean Changed;
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return;
+	$Adventurer_Guild_Ensure_Guild_State(Guild);
+	$Adventurer_Guild_Chart_Prune(Guild);
+	$Adventurer_Guild_Activities_Prune(Guild);
+	Changed = False;
+
+	Available = Guild's "AGAvailableQuests";
+	foreach Quest in Available do
+		if ($Adventurer_Guild_Available_Quest_Valid(Guild, Quest))
+			KeptAvailable << Quest;
+		else
+			begin
+				Changed = True;
+				if ($IsValidGamePiece(Quest))
+					$Adventurer_Guild_Detach_Quest(Quest);
+			end
+	Guild's "AGAvailableQuests" = KeptAvailable;
+
+	Active = Guild's "AGActiveQuests";
+	foreach Quest in Active do
+		begin
+			if ($IsValidGamePiece(Quest))
+				if ($HasAttribute("AGQuestKind", Quest))
+					if (Quest's "AGQuestKind" == 12)
+						$Adventurer_Guild_Pests_Update(Quest);
+
+
+
+
+			if ($IsValidGamePiece(Quest))
+				if ($HasAttribute("AGQuestKind", Quest))
+					if (Quest's "AGQuestKind" == 3)
+						if ($Adventurer_Guild_Monster_Was_Zoo_Captured(
+							Guild,
+							Quest's "AGDestination"
+						))
+							$Adventurer_Guild_Resolve_Zoo_Capture(Quest);
+		if ($Adventurer_Guild_Active_Quest_Valid(Guild, Quest))
+			KeptActive << Quest;
+		else
+			begin
+				Changed = True;
+				if ($IsValidGamePiece(Quest))
+					$Adventurer_Guild_Fail_Quest(Quest);
+			end
+		end
+	Guild's "AGActiveQuests" = KeptActive;
+
+	if (Changed)
+		$Adventurer_Guild_Publish_Rows(Guild);
+end
+
+
+function Adventurer_Guild_Supply_Run_Can_Generate(agent Guild) is boolean
+declare
+	list Buildings;
+	agent Destination1;
+	agent Destination2;
+	boolean Found;
+begin
+	Found = False;
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+
+	foreach Destination1 in Buildings do
+		if ($Adventurer_Guild_Economy_Building_Valid(Guild, Destination1))
+			if ($Adventurer_Guild_Target_In_Use(Guild, Destination1) == False)
+				foreach Destination2 in Buildings do
+					if (Destination2 != Destination1)
+						if (Destination2's "title" != Destination1's "title")
+							if ($Adventurer_Guild_Economy_Building_Valid(
+								Guild,
+								Destination2
+							))
+								if ($Adventurer_Guild_Target_In_Use(
+									Guild,
+									Destination2
+								) == False)
+									Found = True;
+
+	return Found;
+end
+
+
+function Adventurer_Guild_Cleanse_Den_Can_Generate(agent Guild) is boolean
+
+
+
+
+declare
+	list Lairs;
+	agent Lair;
+	boolean Found;
+begin
+	Found = False;
+	$ListObjects(Guild, "lair", -1, Lairs, #NotMyTeam);
+	foreach Lair in Lairs do
+		if ($Adventurer_Guild_Lair_Target_Valid(Guild, Lair))
+			if ($Adventurer_Guild_Target_In_Use(Guild, Lair) == False)
+				Found = True;
+	return Found;
+end
+
+
+function Adventurer_Guild_Monster_Bounty_Can_Generate(agent Guild) is boolean
+
+
+
+
+declare
+	list Monsters;
+	agent Monster;
+	boolean Found;
+begin
+	Found = False;
+	$ListObjects(Guild, "monster", -1, Monsters, #NotMyTeam);
+	foreach Monster in Monsters do
+		if ($Adventurer_Guild_Monster_Target_Valid(Guild, Monster))
+			if ($Adventurer_Guild_Target_In_Use(Guild, Monster) == False)
+				Found = True;
+	return Found;
+end
+
+
+function Adventurer_Guild_Scout_Can_Generate(agent Guild) is boolean
+declare
+	list Candidates;
+begin
+	Candidates = $Adventurer_Guild_Scout_Candidates(Guild);
+	return ($ListSize(Candidates) > 0);
+end
+
+
+function Adventurer_Guild_Reward_For(
+	agent Guild,
+	agent Destination
+) is integer
+declare
+	integer Distance;
+begin
+	Distance = $DistanceBetweenAgents(Guild, Destination);
+	if (Distance >= 1500)
+		return 300;
+	if (Distance >= 750)
+		return 200;
+	return 100;
+end
+
+
+function Adventurer_Guild_Quest_Kind_In_Use(
+	agent Guild,
+	integer Kind
+) is boolean
+declare
+	list Quests;
+	agent Quest;
+	boolean Found;
+begin
+	Found = False;
+	Quests = Guild's "AGAvailableQuests";
+	foreach Quest in Quests do
+		if ($IsValidGamePiece(Quest))
+			if ($HasAttribute("AGQuestKind", Quest))
+				if (Quest's "AGQuestKind" == Kind)
+					Found = True;
+
+	return Found;
+end
+
+
+function Adventurer_Guild_Select_Unused_Quest_Kind(
+	agent Guild,
+	boolean AllowSupplyRun,
+	boolean AllowCleanseDen,
+	boolean AllowMonsterBounty,
+	boolean AllowScout
+) is integer
+declare
+	integer Attempts;
+	integer Kind;
+begin
+
+
+
+	Attempts = 0;
+	while (Attempts < 32) do
+		begin
+			Kind = $RandomNumber(8) + 1;
+			if ((Kind != 4) && (Kind != 6) && (Kind != 8) && ((Kind != 5) || (AllowSupplyRun)))
+				if ((Kind != 2) || (AllowCleanseDen))
+					if ((Kind != 3) || (AllowMonsterBounty))
+						if ((Kind != 7) || (AllowScout))
+							if ($Adventurer_Guild_Quest_Kind_In_Use(Guild, Kind) == False)
+								return Kind;
+			Attempts += 1;
+		end
+
+	Kind = 1;
+	while (Kind <= 8) do
+		begin
+			if ((Kind != 4) && (Kind != 6) && (Kind != 8) && ((Kind != 5) || (AllowSupplyRun)))
+				if ((Kind != 2) || (AllowCleanseDen))
+					if ((Kind != 3) || (AllowMonsterBounty))
+						if ((Kind != 7) || (AllowScout))
+							if ($Adventurer_Guild_Quest_Kind_In_Use(Guild, Kind) == False)
+								return Kind;
+			Kind += 1;
+		end
+
+	return 0;
+end
+
+
+function Adventurer_Guild_Configure_Placeholder_Quest(
+	agent Guild,
+	agent Quest,
+	integer Kind
+) is boolean
+declare
+	integer RowKey;
+begin
+
+	if (Kind == 4)
+		return False;
+	if (Kind == 2)
+		begin
+			if ($Adventurer_Guild_Lair_Target_Valid(Guild, Quest) == False)
+				return False;
+		end
+	else if (Kind == 3)
+		begin
+			if ($Adventurer_Guild_Monster_Target_Valid(Guild, Quest) == False)
+				return False;
+		end
+	else if (Kind == 7)
+		begin
+			if ($Adventurer_Guild_Scout_Offer_Valid(Guild, Quest) == False)
+				return False;
+		end
+	else if (Kind == 6)
+		begin
+			if ($Adventurer_Guild_Treasure_Target_Valid(Guild, Quest) == False)
+				return False;
+		end
+	else if (Kind == 8)
+		begin
+			if ($Adventurer_Guild_Patrol_Building_Valid(Guild, Quest) == False)
+				return False;
+		end
+	else
+		if ($Adventurer_Guild_Destination_Valid(Guild, Quest) == False)
+			return False;
+
+	RowKey = $Adventurer_Guild_Allocate_Row_Key(Guild);
+	if (RowKey <= 0)
+		return False;
+	$Adventurer_Guild_Ensure_Quest_State(Quest);
+	Quest's "AGRowKey" = RowKey;
+	Quest's "AGQuestKind" = Kind;
+	Quest's "AGGuild" = Guild;
+	Quest's "AGDestination" = Quest;
+	Quest's "AGDestination2" = $NullAgent();
+	Quest's "AGStage" = 0;
+	Quest's "AGClaimant" = $NullAgent();
+	Quest's "AGApplicant" = $NullAgent();
+	Quest's "AGObjectiveComplete" = False;
+	Quest's "AGPaid" = False;
+
+	if (Kind == 1)
+		begin
+			Quest's "AGName" = "Royal Dispatch";
+			Quest's "AGGoal" = "Deliver royal orders";
+			Quest's "AGReward" = 100;
+			return True;
+		end
+	if (Kind == 2)
+		begin
+			Quest's "AGName" = "Cleanse the Den";
+			Quest's "AGGoal" = "Destroy a hostile lair";
+			Quest's "AGReward" = 600;
+			return True;
+		end
+	if (Kind == 3)
+		begin
+			Quest's "AGName" = "Monster Bounty";
+			Quest's "AGGoal" = "Defeat the marked monster";
+			Quest's "AGReward" =
+				$Adventurer_Guild_Monster_Bounty_Reward(Quest);
+			return True;
+		end
+	if (Kind == 5)
+		begin
+			Quest's "AGName" = "Supply Run";
+			Quest's "AGGoal" = "Collect city supplies";
+			Quest's "AGReward" = 150;
+			return True;
+		end
+	if (Kind == 6)
+		begin
+			Quest's "AGName" = "Lost Treasure";
+			Quest's "AGGoal" = "Find a hidden treasure chest";
+			Quest's "AGReward" = 100;
+			return True;
+		end
+	if (Kind == 7)
+		begin
+			Quest's "AGName" = "Scout the Lair";
+			Quest's "AGGoal" = "Discover a hidden lair";
+			Quest's "AGReward" = 300;
+			return True;
+		end
+	if (Kind == 8)
+		begin
+			Quest's "AGName" = "Border Patrol";
+			Quest's "AGGoal" = "Patrol two outposts";
+			Quest's "AGReward" = 300;
+			return True;
+		end
+
+	Quest's "AGQuestKind" = 0;
+	Quest's "AGGuild" = $NullAgent();
+	Quest's "AGDestination" = $NullAgent();
+	Quest's "AGDestination2" = $NullAgent();
+	Quest's "AGStage" = 0;
+	Quest's "AGReward" = 0;
+	return False;
+end
+
+
+function Adventurer_Guild_Create_Supply_Run(agent Guild) is agent
+
+
+
+
+declare
+	list Buildings;
+	list FirstCandidates;
+	list SecondCandidates;
+	agent Destination;
+	agent Destination1;
+	agent Destination2;
+	agent Quest;
+	integer Pick;
+begin
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+
+	foreach Destination in Buildings do
+		if ($Adventurer_Guild_Economy_Building_Valid(Guild, Destination))
+			if ($Adventurer_Guild_Target_In_Use(Guild, Destination) == False)
+				FirstCandidates << Destination;
+
+	if ($ListSize(FirstCandidates) == 0)
+		return $NullAgent();
+	Pick = $RandomNumber($ListSize(FirstCandidates)) + 1;
+	Destination1 = $ListMember(FirstCandidates, Pick);
+
+	foreach Destination in Buildings do
+		if (Destination != Destination1)
+			if (Destination's "title" != Destination1's "title")
+				if ($Adventurer_Guild_Economy_Building_Valid(Guild, Destination))
+					if ($Adventurer_Guild_Target_In_Use(Guild, Destination) == False)
+						SecondCandidates << Destination;
+
+	if ($ListSize(SecondCandidates) == 0)
+		return $NullAgent();
+	Pick = $RandomNumber($ListSize(SecondCandidates)) + 1;
+	Destination2 = $ListMember(SecondCandidates, Pick);
+
+	Quest = Destination1;
+	if ($Adventurer_Guild_Configure_Placeholder_Quest(
+		Guild,
+		Quest,
+		5
+	) == False)
+		return $NullAgent();
+	Quest's "AGDestination2" = Destination2;
+	Quest's "AGStage" = 0;
+	Guild's "AGAvailableQuests" << Quest;
+	return Quest;
+end
+
+
+function Adventurer_Guild_Create_Patrol(agent Guild) is agent
+
+
+declare
+	list Candidates, SecondCandidates;
+	agent Destination1, Destination2, Quest;
+	integer Pick;
+begin
+	Candidates = $Adventurer_Guild_Patrol_Candidates(Guild);
+	if ($ListSize(Candidates) == 0)
+		return $NullAgent();
+	Pick = $RandomNumber($ListSize(Candidates)) + 1;
+	Destination1 = $ListMember(Candidates, Pick);
+	foreach Destination2 in Candidates do
+		if (Destination2 != Destination1)
+			if ($DistanceBetweenAgents(Destination1, Destination2) >=
+				#Adventurer_Guild_Patrol_Min_Distance)
+				SecondCandidates << Destination2;
+	if ($ListSize(SecondCandidates) == 0)
+		return $NullAgent();
+	Pick = $RandomNumber($ListSize(SecondCandidates)) + 1;
+	Destination2 = $ListMember(SecondCandidates, Pick);
+	Quest = Destination1;
+	if ($Adventurer_Guild_Configure_Placeholder_Quest(Guild, Quest, 8) == False)
+		return $NullAgent();
+	Quest's "AGDestination2" = Destination2;
+	Quest's "AGStage" = 0;
+	Guild's "AGAvailableQuests" << Quest;
+	return Quest;
+end
+
+
+function Adventurer_Guild_Create_Cleanse_Den(agent Guild) is agent
+
+
+
+
+declare
+	list Lairs;
+	list Candidates;
+	agent Lair;
+	agent Quest;
+	integer Pick;
+begin
+	$ListObjects(Guild, "lair", -1, Lairs, #NotMyTeam);
+	foreach Lair in Lairs do
+		if ($Adventurer_Guild_Lair_Target_Valid(Guild, Lair))
+			if ($Adventurer_Guild_Target_In_Use(Guild, Lair) == False)
+				Candidates << Lair;
+
+	if ($ListSize(Candidates) == 0)
+		return $NullAgent();
+
+	Pick = $RandomNumber($ListSize(Candidates)) + 1;
+	Quest = $ListMember(Candidates, Pick);
+	if ($Adventurer_Guild_Configure_Placeholder_Quest(
+		Guild,
+		Quest,
+		2
+	) == False)
+		return $NullAgent();
+
+	Guild's "AGAvailableQuests" << Quest;
+	return Quest;
+end
+
+
+function Adventurer_Guild_Create_Monster_Bounty(agent Guild) is agent
+
+
+
+
+
+declare
+	list Monsters;
+	list Candidates;
+	agent Monster;
+	agent Quest;
+	integer Pick;
+begin
+	$ListObjects(Guild, "monster", -1, Monsters, #NotMyTeam);
+	foreach Monster in Monsters do
+		if ($Adventurer_Guild_Monster_Target_Valid(Guild, Monster))
+			if ($Adventurer_Guild_Target_In_Use(Guild, Monster) == False)
+				Candidates << Monster;
+
+	if ($ListSize(Candidates) == 0)
+		return $NullAgent();
+
+	Pick = $RandomNumber($ListSize(Candidates)) + 1;
+	Quest = $ListMember(Candidates, Pick);
+	if ($Adventurer_Guild_Configure_Placeholder_Quest(
+		Guild,
+		Quest,
+		3
+	) == False)
+		return $NullAgent();
+
+	Guild's "AGAvailableQuests" << Quest;
+	return Quest;
+end
+
+
+function Adventurer_Guild_Create_Scout(agent Guild) is agent
+declare
+	list Candidates;
+	agent Quest;
+	integer Pick;
+begin
+	Candidates = $Adventurer_Guild_Scout_Candidates(Guild);
+	if ($ListSize(Candidates) == 0)
+		return $NullAgent();
+	Pick = $RandomNumber($ListSize(Candidates)) + 1;
+	Quest = $ListMember(Candidates, Pick);
+	if ($Adventurer_Guild_Configure_Placeholder_Quest(Guild, Quest, 7) == False)
+		return $NullAgent();
+	Guild's "AGAvailableQuests" << Quest;
+	return Quest;
+end
+
+
+function Adventurer_Guild_Create_Treasure(agent Guild, list Candidates) is agent
+declare
+	agent Quest;
+begin
+	if ($ListSize(Candidates) == 0)
+		return $NullAgent();
+	Quest = $ListMember(Candidates, $RandomNumber($ListSize(Candidates)) + 1);
+	if ($Adventurer_Guild_Configure_Placeholder_Quest(Guild, Quest, 6) == False)
+		return $NullAgent();
+	Guild's "AGAvailableQuests" << Quest;
+	return Quest;
+end
+
+
+function Adventurer_Guild_Create_Dispatch(
+	agent Guild,
+	agent Destination,
+	integer Kind
+) is agent
+declare
+	agent Quest;
+begin
+	if ($Adventurer_Guild_Destination_Valid(Guild, Destination) == False)
+		return $NullAgent();
+
+
+
+
+
+	Quest = Destination;
+	if ($Adventurer_Guild_Configure_Placeholder_Quest(
+		Guild,
+		Quest,
+		Kind
+	) == False)
+		return $NullAgent();
+	Guild's "AGAvailableQuests" << Quest;
+
+	return Quest;
+end
+
+
+function Adventurer_Guild_Delete_Available(agent Guild)
+declare
+	list Quests;
+	agent Quest;
+	agent Applicant;
+begin
+	$Adventurer_Guild_Activities_Clear(Guild);
+	Quests = Guild's "AGAvailableQuests";
+	foreach Quest in Quests do
+		if ($IsValidGamePiece(Quest))
+			begin
+				$Adventurer_Guild_Ensure_Quest_State(Quest);
+				if ($HasAttribute("AGGuild", Quest))
+				if (Quest's "AGGuild" == Guild)
+					begin
+						Applicant = Quest's "AGApplicant";
+						if ($IsValidGamePiece(Applicant))
+							$Adventurer_Guild_Remove_Applicant(Guild, Applicant);
+						Quest's "AGQuestKind" = 0;
+						Quest's "AGGuild" = $NullAgent();
+						Quest's "AGDestination" = $NullAgent();
+						Quest's "AGDestination2" = $NullAgent();
+						Quest's "AGStage" = 0;
+						Quest's "AGClaimant" = $NullAgent();
+						Quest's "AGApplicant" = $NullAgent();
+						Quest's "AGObjectiveComplete" = False;
+						Quest's "AGPaid" = False;
+						Quest's "AGReward" = 0;
+					end
+			end
+
+	$ClearList(Guild's "AGAvailableQuests");
+	$ClearList(Guild's "AGChartKeys");
+	$ClearList(Guild's "AGChartPoints");
+end
+
+
+function Adventurer_Guild_Refresh_Offers(agent Guild) is boolean
+declare
+	list Buildings;
+	list Candidates;
+	list TreasureCandidates;
+	list PatrolCandidates;
+	list FallbackKinds;
+	agent Destination;
+	agent Quest;
+	integer Kind;
+	integer Pick;
+	integer Posted;
+	integer OrdinarySlots;
+	boolean AllowSupplyRun;
+	boolean IncludeSupplyRun;
+	boolean AllowCleanseDen;
+	boolean IncludeCleanseDen;
+	boolean AllowMonsterBounty;
+	boolean IncludeMonsterBounty;
+	boolean AllowScout;
+	boolean IncludeScout;
+	boolean IncludePatrol;
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+
+	$Adventurer_Guild_Ensure_Guild_State(Guild);
+	if ($Adventurer_Guild_Activities_Batch_Ready())
+		return $Adventurer_Guild_Activities_Refresh(Guild);
+	$Adventurer_Guild_Delete_Available(Guild);
+	Guild's "AGProofOfferVisible" = True;
+
+
+
+
+
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+
+	foreach Destination in Buildings do
+		if (Destination != Guild)
+			if (Destination's "title" != "Adventurer_Guild")
+				if ($Adventurer_Guild_Target_In_Use(Guild, Destination) == False)
+					Candidates << Destination;
+
+	AllowSupplyRun = $Adventurer_Guild_Supply_Run_Can_Generate(Guild);
+	IncludeSupplyRun = False;
+	if (AllowSupplyRun)
+		if ($RandomNumber(2) == 0)
+			IncludeSupplyRun = True;
+		else
+			FallbackKinds << 5;
+	AllowCleanseDen = $Adventurer_Guild_Cleanse_Den_Can_Generate(Guild);
+	IncludeCleanseDen = False;
+	if (AllowCleanseDen)
+		if ($RandomNumber(2) == 0)
+			IncludeCleanseDen = True;
+		else
+			FallbackKinds << 2;
+	AllowMonsterBounty = $Adventurer_Guild_Monster_Bounty_Can_Generate(Guild);
+	IncludeMonsterBounty = False;
+	if (AllowMonsterBounty)
+		if ($RandomNumber(2) == 0)
+			IncludeMonsterBounty = True;
+		else
+			FallbackKinds << 3;
+	AllowScout = $Adventurer_Guild_Scout_Can_Generate(Guild);
+	IncludeScout = False;
+	if (AllowScout)
+		if ($RandomNumber(2) == 0)
+			IncludeScout = True;
+		else
+			FallbackKinds << 7;
+	PatrolCandidates = $Adventurer_Guild_Patrol_Candidates(Guild);
+	IncludePatrol = False;
+	if ($ListSize(PatrolCandidates) > 0)
+		if ($RandomNumber(2) == 0)
+			IncludePatrol = True;
+		else
+			FallbackKinds << 8;
+
+
+
+
+
+	Posted = 0;
+	if (IncludeSupplyRun)
+		begin
+			Quest = $Adventurer_Guild_Create_Supply_Run(Guild);
+			if ($IsValidGamePiece(Quest))
+				begin
+					Candidates -= Quest;
+					Posted = 1;
+				end
+		end
+	if (IncludeCleanseDen)
+		begin
+			Quest = $Adventurer_Guild_Create_Cleanse_Den(Guild);
+			if ($IsValidGamePiece(Quest))
+				Posted += 1;
+		end
+	if (IncludeMonsterBounty)
+		begin
+			Quest = $Adventurer_Guild_Create_Monster_Bounty(Guild);
+			if ($IsValidGamePiece(Quest))
+				Posted += 1;
+		end
+	if (IncludeScout)
+		begin
+			Quest = $Adventurer_Guild_Create_Scout(Guild);
+			if ($IsValidGamePiece(Quest))
+				Posted += 1;
+		end
+	if (Posted < #Adventurer_Guild_Offers_Per_Refresh)
+		if (IncludePatrol)
+			begin
+				Quest = $Adventurer_Guild_Create_Patrol(Guild);
+				if ($IsValidGamePiece(Quest))
+					begin
+						Candidates -= Quest;
+						Posted += 1;
+					end
+			end
+	if (Posted < #Adventurer_Guild_Offers_Per_Refresh)
+		begin
+			TreasureCandidates = $Adventurer_Guild_Treasure_Candidates(Guild);
+			if ($ListSize(TreasureCandidates) > 0)
+				if ($RandomNumber(2) == 0)
+					begin
+						Quest = $Adventurer_Guild_Create_Treasure(Guild, TreasureCandidates);
+						if ($IsValidGamePiece(Quest))
+							Posted += 1;
+					end
+				else
+					FallbackKinds << 6;
+		end
+
+	if (Posted < #Adventurer_Guild_Offers_Per_Refresh)
+		if ($RandomNumber(2) == 0)
+			begin
+				if ($Adventurer_Guild_Create_Chart(Guild))
+					Posted += 1;
+			end
+		else
+			FallbackKinds << 4;
+
+
+
+
+
+
+
+	OrdinarySlots = $ListSize(Candidates);
+	if (OrdinarySlots > 1)
+		OrdinarySlots = 1;
+	while (((Posted + OrdinarySlots) < #Adventurer_Guild_Offers_Per_Refresh) && ($ListSize(FallbackKinds) > 0)) do
+		begin
+			Pick = $RandomNumber($ListSize(FallbackKinds)) + 1;
+			Kind = $ListMember(FallbackKinds, Pick);
+			FallbackKinds -= Kind;
+			Quest = $NullAgent();
+			if (Kind == 5)
+				Quest = $Adventurer_Guild_Create_Supply_Run(Guild);
+			else if (Kind == 8)
+				Quest = $Adventurer_Guild_Create_Patrol(Guild);
+			else if (Kind == 2)
+				Quest = $Adventurer_Guild_Create_Cleanse_Den(Guild);
+			else if (Kind == 3)
+				Quest = $Adventurer_Guild_Create_Monster_Bounty(Guild);
+			else if (Kind == 7)
+				Quest = $Adventurer_Guild_Create_Scout(Guild);
+			else if (Kind == 6)
+				Quest = $Adventurer_Guild_Create_Treasure(Guild, TreasureCandidates);
+			else if (Kind == 4)
+				if ($Adventurer_Guild_Create_Chart(Guild))
+					Quest = Guild;
+			if ($IsValidGamePiece(Quest))
+				begin
+					Candidates -= Quest;
+					Posted += 1;
+				end
+			OrdinarySlots = $ListSize(Candidates);
+			if (OrdinarySlots > 1)
+				OrdinarySlots = 1;
+		end
+
+	while (($ListSize(Candidates) > 0) && (Posted < #Adventurer_Guild_Offers_Per_Refresh)) do
+		begin
+			Kind = $Adventurer_Guild_Select_Unused_Quest_Kind(
+				Guild,
+				False,
+				False,
+				False,
+				False
+			);
+			if (Kind == 0)
+				begin
+
+					$Adventurer_Guild_Publish_Rows(Guild);
+					return (Posted > 0);
+				end
+			Pick = $RandomNumber($ListSize(Candidates)) + 1;
+			Destination = $ListMember(Candidates, Pick);
+			Candidates -= Destination;
+			Quest = $Adventurer_Guild_Create_Dispatch(
+				Guild,
+				Destination,
+				Kind
+			);
+			if ($IsValidGamePiece(Quest))
+				Posted += 1;
+		end
+
+	$Adventurer_Guild_Publish_Rows(Guild);
+	if (Posted > 0)
+		return True;
+	return False;
+end
+
+
+function Adventurer_Guild_Scheduled_Refresh(agent Guild, integer Generation)
+
+
+
+
+
+declare
+begin
+end
+
+
+function Adventurer_Guild_Quest_Executable(
+	agent Hero,
+	agent Guild,
+	agent Quest
+) is boolean
+
+
+
+declare
+begin
+	if (($IsValidGamePiece(Hero) == False) ||
+		($IsValidGamePiece(Guild) == False) ||
+		($IsValidGamePiece(Quest) == False))
+		return False;
+	if ($UnitsAreSamePlayer(Hero, Guild) == False)
+		return False;
+	if ($HasAttribute("AGQuestKind", Quest) == False)
+		return False;
+	if ((Quest's "AGQuestKind" != 1) &&
+		(Quest's "AGQuestKind" != 2) &&
+		(Quest's "AGQuestKind" != 3) &&
+		(Quest's "AGQuestKind" != 4) &&
+		(Quest's "AGQuestKind" != 5) &&
+		(Quest's "AGQuestKind" != 6) &&
+		(Quest's "AGQuestKind" != 7) &&
+		(Quest's "AGQuestKind" != 8))
+		return False;
+	if (Quest's "AGGuild" != Guild)
+		return False;
+	if (Quest's "AGPaid")
+		return False;
+	if (Quest's "AGObjectiveComplete")
+		return False;
+	if ($IsValidGamePiece(Quest's "AGClaimant"))
+		return False;
+	if ($IsValidGamePiece(Quest's "AGApplicant"))
+		if (Quest's "AGApplicant" != Hero)
+			return False;
+	if (Quest's "AGQuestKind" == 4)
+		return ((Quest == Guild) &&
+			$Adventurer_Guild_Chart_Unexplored(Guild, Quest's "AGChartPoint"));
+	if (Quest's "AGQuestKind" == 2)
+		begin
+			if ($Adventurer_Guild_Lair_Target_Valid(
+				Guild,
+				Quest's "AGDestination"
+			) == False)
+				return False;
+		end
+	else
+	if (Quest's "AGQuestKind" == 3)
+		begin
+			if ($Adventurer_Guild_Monster_Target_Valid(
+				Guild,
+				Quest's "AGDestination"
+			) == False)
+				return False;
+		end
+	else
+	if (Quest's "AGQuestKind" == 6)
+		begin
+			if ($Adventurer_Guild_Treasure_Target_Valid(Guild, Quest's "AGDestination") == False)
+				return False;
+		end
+	else
+	if (Quest's "AGQuestKind" == 7)
+		begin
+			if ($Adventurer_Guild_Scout_Offer_Valid(
+				Guild,
+				Quest's "AGDestination"
+			) == False)
+				return False;
+		end
+	else
+	if ((Quest's "AGQuestKind" == 5) || (Quest's "AGQuestKind" == 8))
+		begin
+			if ($Adventurer_Guild_Two_Stop_Objectives_Valid(
+				Guild,
+				Quest
+			) == False)
+				return False;
+		end
+	else
+		if ($Adventurer_Guild_Destination_Valid(
+			Guild,
+			Quest's "AGDestination"
+		) == False)
+			return False;
+	return True;
+end
+
+
+function Adventurer_Guild_Offer_Value(
+	agent Hero,
+	agent Guild,
+	agent Quest
+) is integer
+declare
+	integer Reward;
+begin
+	if ($Adventurer_Guild_Quest_Executable(Hero, Guild, Quest) == False)
+		return 0;
+
+	Reward = Quest's "AGReward";
+	if (Reward <= 0)
+		return 0;
+
+
+
+
+
+	return Reward;
+end
+
+
+function Adventurer_Guild_Best_Offer(agent Guild, agent Hero) is agent
+declare
+	list Quests;
+	agent Quest;
+	agent BestQuest;
+	integer BestScore;
+	integer Score;
+begin
+	BestScore = 0;
+	Quests = Guild's "AGAvailableQuests";
+
+	foreach Quest in Quests do
+		begin
+			Score = $Adventurer_Guild_Offer_Value(Hero, Guild, Quest);
+			if (Score > BestScore)
+				begin
+					BestScore = Score;
+					BestQuest = Quest;
+				end
+		end
+
+	return BestQuest;
+end
+
+
+function Adventurer_Guild_Remove_Applicant(agent Guild, agent Hero)
+declare
+	agent Quest;
+begin
+	if ($IsValidGamePiece(Guild))
+		if ($HasAttribute("AGApplicants", Guild))
+			Guild's "AGApplicants" -= Hero;
+
+	if ($IsValidGamePiece(Hero))
+		begin
+			if ($HasAttribute("AGPendingQuest", Hero))
+				begin
+					Quest = Hero's "AGPendingQuest";
+					if ($IsValidGamePiece(Quest))
+						if ($HasAttribute("AGApplicant", Quest))
+							if (Quest's "AGApplicant" == Hero)
+								Quest's "AGApplicant" = $NullAgent();
+					Hero's "AGPendingQuest" = $NullAgent();
+				end
+			if ($HasAttribute("AGPendingGuild", Hero))
+				Hero's "AGPendingGuild" = $NullAgent();
+			if ($HasAttribute("AGXPendingKey", Hero))
+				Hero's "AGXPendingKey" = 0;
+		end
+end
+
+
+function Adventurer_Guild_Intent(agent Hero, integer Phase)
+declare
+	agent Quest;
+	integer Kind;
+begin
+	if ((Phase == 1) || (Phase == 3))
+		$SpecifyIntent(Hero, #Intent_Going_To_Adventurers_Guild);
+	else
+		if (Phase == 2)
+			begin
+
+
+				Kind = 0;
+				if ($HasAttribute("AGAcceptedQuest", Hero))
+					begin
+						Quest = Hero's "AGAcceptedQuest";
+						if ($IsValidGamePiece(Quest))
+							if ($HasAttribute("AGQuestKind", Quest))
+								Kind = Quest's "AGQuestKind";
+					end
+
+
+				if (Kind == 1)
+					$SpecifyIntent(Hero, #Intent_AG_Royal_Dispatch);
+				else if (Kind == 2)
+					$SpecifyIntent(Hero, #Intent_AG_Cleanse_Den);
+				else if (Kind == 3)
+					$SpecifyIntent(Hero, #Intent_AG_Monster_Bounty);
+				else if (Kind == 4)
+					$SpecifyIntent(Hero, #Intent_AG_Chart_Wilds);
+				else if (Kind == 5)
+					$SpecifyIntent(Hero, #Intent_AG_Supply_Run);
+				else if (Kind == 6)
+					$SpecifyIntent(Hero, #Intent_AG_Lost_Treasure);
+				else if (Kind == 7)
+					$SpecifyIntent(Hero, #Intent_AG_Scout_Lair);
+				else if (Kind == 8)
+					$SpecifyIntent(Hero, #Intent_AG_Border_Patrol);
+				else if (Kind == 9)
+					$SpecifyIntent(Hero, #Intent_AG_Answer_Call);
+				else if (Kind == 10)
+					$SpecifyIntent(Hero, #Intent_AG_Watch_Back);
+				else if (Kind == 11)
+					$SpecifyIntent(Hero, #Intent_AG_Caravan_Guard);
+				else if (Kind == 12)
+					$SpecifyIntent(Hero, #Intent_AG_Pest_Control);
+				else if (Kind == 13)
+					$SpecifyIntent(Hero, #Intent_AG_Field_Testing);
+				else if (Kind == 14)
+					$SpecifyIntent(Hero, #Intent_AG_Hold_Line);
+				else if (Kind == 15)
+					$SpecifyIntent(Hero, #Intent_AG_Tournament);
+				else if (Kind == 16)
+					$SpecifyIntent(Hero, #Intent_AG_Trade_Route);
+				else
+					$SpecifyIntent(Hero, #Intent_Performing_A_Quest);
+			end
+end
+
+
+function Adventurer_Guild_Start_Application(
+	agent Hero,
+	agent Guild,
+	agent Quest
+) is boolean
+declare
+	boolean CanFindPath;
+	float Cost;
+begin
+	if (($IsValidGamePiece(Hero) == False) ||
+		($IsValidGamePiece(Guild) == False) ||
+		($IsValidGamePiece(Quest) == False))
+		return False;
+	if ($Adventurer_Guild_Is_Open(Guild) == False)
+		return False;
+
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+	$Adventurer_Guild_Ensure_Guild_State(Guild);
+	if ($Adventurer_Guild_Quest_Executable(Hero, Guild, Quest) == False)
+		return False;
+	if ($AgentInList(Quest, Guild's "AGAvailableQuests") == False)
+		return False;
+
+
+
+
+	if (Quest's "AGQuestKind" == 4)
+		if ($InsideBuilding(Hero) == False)
+			begin
+				CanFindPath = False;
+				Cost = $PathCost($LocationOf(Hero), Quest's "AGChartPoint",
+					"check_buildings", CanFindPath, Hero);
+				if (CanFindPath == False)
+					return False;
+			end
+
+
+
+	Hero's "AGPendingGuild" = Guild;
+	Hero's "AGPendingQuest" = Quest;
+	Quest's "AGApplicant" = Hero;
+	Hero's "Target" = Guild;
+	Hero's "TaskName" = "AdventurerGuildClaim";
+	Hero's "ActiveScript" = $Use_Building;
+
+	if ($AgentInList(Hero, Guild's "AGApplicants") == False)
+		Guild's "AGApplicants" << Hero;
+
+	$Adventurer_Guild_Intent(Hero, 1);
+	return True;
+end
+
+
+function Adventurer_Guild_Consider(agent Hero) is boolean
+declare
+	list Buildings;
+	list Guilds;
+	agent Guild;
+	agent Quest;
+	agent BestGuild;
+	agent BestQuest;
+	integer Score;
+	integer BestScore;
+	integer ActivityKey, ActivityIndex, BestActivityKey;
+begin
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+
+	if ($IsValidGamePiece(Hero's "AGAcceptedQuest"))
+		return False;
+	if ($IsValidGamePiece(Hero's "AGPendingGuild"))
+		return False;
+
+
+
+
+	if ($RandomNumber(100) + 1 > 60)
+		return False;
+
+	$ListObjects(Hero, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+	Guilds = $ListTitles(Buildings, "Adventurer_Guild");
+	BestScore = 0;
+	BestActivityKey = 0;
+
+	foreach Guild in Guilds do
+		begin
+			$Adventurer_Guild_Ensure_Guild_State(Guild);
+			if ($Adventurer_Guild_Is_Open(Guild))
+				if ($DistanceBetweenAgents(Hero, Guild) < #Fairgrounds_Attraction_Range)
+					if ($ListSize(Guild's "AGActiveQuests") < 4)
+				begin
+					Quest = $Adventurer_Guild_Best_Offer(Guild, Hero);
+					if ($IsValidGamePiece(Quest))
+						begin
+							Score = $Adventurer_Guild_Offer_Value(Hero, Guild, Quest);
+							if (Score > BestScore)
+								begin
+									BestScore = Score;
+									BestGuild = Guild;
+									BestQuest = Quest;
+									BestActivityKey = 0;
+								end
+						end
+					ActivityKey = $Adventurer_Guild_Activity_Best_Key(Guild, Hero);
+					if (ActivityKey > 0)
+						begin
+							ActivityIndex = $Adventurer_Guild_Activity_Index(Guild, ActivityKey);
+							Score = $ListMember(Guild's "AGXRewards", ActivityIndex);
+							if (Score > BestScore)
+								begin
+									BestScore = Score;
+									BestGuild = Guild;
+									BestQuest = $NullAgent();
+									BestActivityKey = ActivityKey;
+								end
+						end
+				end
+		end
+
+	if (BestActivityKey > 0)
+		return $Adventurer_Guild_Activity_Start_Application(BestGuild, BestActivityKey, Hero);
+	if (($IsValidGamePiece(BestGuild)) && ($IsValidGamePiece(BestQuest)))
+		return $Adventurer_Guild_Start_Application(Hero, BestGuild, BestQuest);
+
+	return False;
+end
+
+
+function Adventurer_Guild_Assign_Outbound(agent Hero, agent Quest) is boolean
+declare
+	agent Destination;
+	agent Guild;
+	integer Kind;
+	coordinate Point;
+	boolean CanFindPath;
+	float Cost;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+
+	Guild = Quest's "AGGuild";
+	Kind = Quest's "AGQuestKind";
+	if ((Kind >= 9) && (Kind <= 16))
+		return $Adventurer_Guild_Activity_Assign(Hero);
+	Destination = Quest's "AGDestination";
+	if (Kind == 6)
+		begin
+			if ($Adventurer_Guild_Treasure_Target_Valid(Guild, Destination) == False)
+				return False;
+			Hero's "Target" = Destination;
+			Hero's "TaskName" = "AdventurerGuildTreasure";
+			Hero's "ActiveScript" = $Adventurer_Guild_Treasure_Grab_Item;
+			Hero's "BackScript" = $Adventurer_Guild_Treasure_Grab_Item;
+			$Adventurer_Guild_Intent(Hero, 2);
+			return True;
+		end
+	if ((Kind == 2) || (Kind == 3))
+		begin
+
+
+
+			if (Kind == 2)
+				begin
+					if ($Adventurer_Guild_Lair_Target_Valid(
+						Guild,
+						Destination
+					) == False)
+						return False;
+				end
+			else
+				if ($Adventurer_Guild_Monster_Target_Valid(
+					Guild,
+					Destination
+				) == False)
+					return False;
+			Hero's "Target" = Destination;
+			if (Kind == 2)
+				Hero's "TaskName" = "AdventurerGuildCleanse";
+			else
+				Hero's "TaskName" = "AdventurerGuildBounty";
+			Hero's "ActiveScript" = $Attack_Object;
+			$Adventurer_Guild_Intent(Hero, 2);
+			return True;
+		end
+	if (Kind == 4)
+		begin
+			Point = Quest's "AGChartPoint";
+			CanFindPath = False;
+			Cost = $PathCost($LocationOf(Hero), Point, "check_buildings", CanFindPath, Hero);
+			if (CanFindPath == False)
+				return False;
+		end
+	else if (Kind == 7)
+		begin
+
+			if ($Adventurer_Guild_Lair_Target_Valid(Guild, Destination) == False)
+				return False;
+		end
+	else if ((Kind == 5) || (Kind == 8))
+		begin
+			if ($Adventurer_Guild_Two_Stop_Objectives_Valid(
+				Guild,
+				Quest
+			) == False)
+				return False;
+			if (Quest's "AGStage" == 1)
+				Destination = Quest's "AGDestination2";
+			else
+				if (Quest's "AGStage" != 0)
+					return False;
+		end
+	else
+		if ($Adventurer_Guild_Destination_Valid(Guild, Destination) == False)
+			return False;
+
+
+
+
+	Hero's "Target" = Hero;
+	if (Kind == 4)
+		Hero's "Destination" = Quest's "AGChartPoint";
+	else
+		Hero's "Destination" = $LocationOf(Destination);
+	Hero's "TaskName" = "AdventurerGuildDispatch";
+	Hero's "ActiveScript" = $Travel_To;
+	Hero's "BackScript" = $Adventurer_Guild_Dispatch_Outbound;
+	$Adventurer_Guild_Intent(Hero, 2);
+	$Move(Hero, Hero's "Destination");
+	return True;
+end
+
+
+function Adventurer_Guild_Treasure_Eval_Items(agent ThisAgent) is boolean
+declare
+begin
+
+	if (ThisAgent's "BackScript" == $Adventurer_Guild_Treasure_Grab_Item)
+		return False;
+	return $Eval_Items_Nearby(ThisAgent);
+end
+
+
+function Adventurer_Guild_Treasure_Travel_To(agent ThisAgent)
+declare
+begin
+
+
+	if ($has_arrived(ThisAgent, False) == False)
+		if ($haslowHP(ThisAgent) == False)
+			begin
+				if ((ThisAgent's "evaluationscript")(ThisAgent) == False)
+					if ($TryTravelSpell(ThisAgent) == False)
+						if ($Adventurer_Guild_Treasure_Eval_Items(ThisAgent) == False)
+							begin
+							end
+			end
+		else
+			begin
+				$heal_self(ThisAgent);
+			end
+end
+
+
+function Adventurer_Guild_Treasure_Grab_Item(agent Hero)
+declare
+	agent Quest, Guild, Target;
+begin
+	Quest = Hero's "AGAcceptedQuest";
+	if ($IsValidGamePiece(Quest) == False)
+		begin
+			$Reset_Tasks(Hero);
+			return;
+		end
+	Guild = Quest's "AGGuild";
+	if (($IsValidGamePiece(Guild) == False) ||
+		(Quest != Hero) || (Quest's "AGQuestKind" != 6) ||
+		(Quest's "AGClaimant" != Hero) || (Quest's "AGPaid"))
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Reset_Tasks(Hero);
+			return;
+		end
+	if (($UnitsAreSamePlayer(Hero, Guild) == False) ||
+		($AgentInList(Quest, Guild's "AGActiveQuests") == False))
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Reset_Tasks(Hero);
+			return;
+		end
+	if (Quest's "AGObjectiveComplete")
+		begin
+			$Adventurer_Guild_Assign_Return(Hero, Quest);
+			return;
+		end
+	Target = Quest's "AGDestination";
+	if ($Adventurer_Guild_Treasure_Target_Valid(Guild, Target) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Reset_Tasks(Hero);
+			return;
+		end
+	Hero's "Target" = Target;
+	if ($IsAdjacent(Hero, Target) == False)
+		begin
+
+			Hero's "ActiveScript" = $Adventurer_Guild_Treasure_Travel_To;
+			Hero's "Destination" = $LocationOf(Target);
+			Hero's "BackScript" = $Adventurer_Guild_Treasure_Grab_Item;
+			$Move(Hero, Target);
+			return;
+		end
+
+
+
+	$Open_Chest(Hero, Target);
+	Quest = Hero's "AGAcceptedQuest";
+	if ($IsValidGamePiece(Quest) == False)
+		return;
+	if ((Quest != Hero) || (Quest's "AGQuestKind" != 6) ||
+		(Quest's "AGClaimant" != Hero) || (Quest's "AGPaid"))
+		return;
+	Quest's "AGObjectiveComplete" = True;
+	if ($Adventurer_Guild_Assign_Return(Hero, Quest) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Reset_Tasks(Hero);
+		end
+end
+
+
+function Adventurer_Guild_Assign_Return(agent Hero, agent Quest) is boolean
+declare
+	agent Guild;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+
+	Guild = Quest's "AGGuild";
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+
+	Hero's "Target" = Guild;
+	Hero's "TaskName" = "AdventurerGuildReturn";
+	Hero's "ActiveScript" = $Use_Building;
+	$Adventurer_Guild_Intent(Hero, 3);
+	return True;
+end
+
+
+function Adventurer_Guild_Claim(agent Guild, agent Hero, agent Quest) is boolean
+declare
+	agent Target;
+	integer Kind;
+	integer Index;
+	list RemainingKeys, RemainingPoints;
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	if ($IsValidGamePiece(Hero) == False)
+		return False;
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+	if ($UnitsAreSamePlayer(Hero, Guild) == False)
+		return False;
+	if ($AgentInList(Quest, Guild's "AGAvailableQuests") == False)
+		return False;
+	if ($ListSize(Guild's "AGActiveQuests") >= 4)
+		return False;
+	if ($IsValidGamePiece(Hero's "AGAcceptedQuest"))
+		return False;
+	if ($Adventurer_Guild_Quest_Executable(Hero, Guild, Quest) == False)
+		return False;
+	if (Quest's "AGApplicant" != Hero)
+		return False;
+
+	Kind = Quest's "AGQuestKind";
+	if ((Kind == 2) || (Kind == 3) || (Kind == 4) || (Kind == 6) || (Kind == 7) || (Kind == 8))
+		begin
+			Target = Quest's "AGDestination";
+
+
+			if ((Kind == 2) || (Kind == 7))
+				begin
+					if ($Adventurer_Guild_Lair_Target_Valid(
+						Guild,
+						Target
+					) == False)
+						return False;
+				end
+			else if (Kind == 6)
+				begin
+					if ($Adventurer_Guild_Treasure_Target_Valid(Guild, Target) == False)
+						return False;
+				end
+			else if (Kind == 3)
+				if ($Adventurer_Guild_Monster_Target_Valid(
+					Guild,
+					Target
+				) == False)
+					return False;
+
+
+
+
+			$Adventurer_Guild_Ensure_Quest_State(Hero);
+			Hero's "AGQuestKind" = Quest's "AGQuestKind";
+			Hero's "AGRowKey" = Quest's "AGRowKey";
+			if (Kind == 4)
+				Hero's "AGChartPoint" = Quest's "AGChartPoint";
+			Hero's "AGGuild" = Guild;
+			Hero's "AGDestination" = Target;
+			Hero's "AGDestination2" = $NullAgent();
+			if (Kind == 8)
+				Hero's "AGDestination2" = Quest's "AGDestination2";
+			Hero's "AGStage" = 0;
+			Hero's "AGClaimant" = Hero;
+			Hero's "AGApplicant" = $NullAgent();
+			Hero's "AGObjectiveComplete" = False;
+			Hero's "AGPaid" = False;
+			Hero's "AGName" = Quest's "AGName";
+			Hero's "AGGoal" = Quest's "AGGoal";
+			Hero's "AGReward" = Quest's "AGReward";
+
+			Guild's "AGAvailableQuests" -= Quest;
+			Guild's "AGActiveQuests" << Hero;
+			Quest's "AGApplicant" = $NullAgent();
+			Quest's "AGClaimant" = Hero;
+			Hero's "AGAcceptedQuest" = Hero;
+			if (Kind == 4)
+				begin
+
+					Index = 2;
+					while (Index <= $ListSize(Guild's "AGChartKeys")) do
+						begin
+							RemainingKeys << $ListMember(Guild's "AGChartKeys", Index);
+							RemainingPoints << $ListMember(Guild's "AGChartPoints", Index);
+							Index += 1;
+						end
+					Guild's "AGChartKeys" = RemainingKeys;
+					Guild's "AGChartPoints" = RemainingPoints;
+					$Adventurer_Guild_Chart_Sync_Head(Guild);
+				end
+			if ((Kind == 2) || (Kind == 3))
+				$CreateEffector(
+					Target,
+					"Adventurer_Guild_Lair_Tracker",
+					1,
+					"infinite"
+				);
+			$Adventurer_Guild_Publish_Rows(Guild);
+			return True;
+		end
+
+
+
+	Guild's "AGAvailableQuests" -= Quest;
+	Guild's "AGActiveQuests" << Quest;
+	Quest's "AGApplicant" = $NullAgent();
+	Quest's "AGClaimant" = Hero;
+	Hero's "AGAcceptedQuest" = Quest;
+	$Adventurer_Guild_Publish_Rows(Guild);
+	return True;
+end
+
+
+function Adventurer_Guild_Visited(agent Hero)
+declare
+	agent Guild;
+	agent Quest;
+	string VisitTask;
+begin
+	Guild = Hero's "Target";
+	VisitTask = Hero's "TaskName";
+
+	$Enter_Building(Hero, Guild);
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+	$Adventurer_Guild_Ensure_Guild_State(Guild);
+
+	if (VisitTask == "AdventurerGuildReturn")
+		begin
+			$Adventurer_Guild_Complete_Return(Hero, Guild);
+			return;
+		end
+
+	Quest = Hero's "AGPendingQuest";
+
+	if ($HasAttribute("AGXPendingKey", Hero))
+		if (Hero's "AGXPendingKey" > 0)
+			begin
+				if ($Adventurer_Guild_Activity_Claim(Guild, Hero))
+					begin
+						$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+						$Exit_Building(Hero, Guild);
+						if ($Adventurer_Guild_Activity_Assign(Hero) == False)
+							begin
+								$Adventurer_Guild_Fail_Quest(Hero);
+								$Reset_Tasks(Hero);
+							end
+						return;
+					end
+				$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+				$Exit_Building(Hero, Guild);
+				return;
+			end
+
+	if ($Adventurer_Guild_Is_Open(Guild))
+		if ($IsValidGamePiece(Quest))
+			if (Quest's "AGApplicant" == Hero)
+				if ($Adventurer_Guild_Quest_Executable(Hero, Guild, Quest))
+			begin
+				if ($Adventurer_Guild_Claim(Guild, Hero, Quest))
+					begin
+						$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+
+
+						$Exit_Building(Hero, Guild);
+						Quest = Hero's "AGAcceptedQuest";
+						if ($Adventurer_Guild_Assign_Outbound(Hero, Quest) == False)
+							begin
+								$Adventurer_Guild_Fail_Quest(Quest);
+								$Reset_Tasks(Hero);
+							end
+						return;
+					end
+			end
+
+	$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+	$Exit_Building(Hero, Guild);
+end
+
+
+function Adventurer_Guild_Dispatch_Outbound(agent Hero)
+declare
+	agent Quest;
+	agent Destination;
+	integer Kind;
+begin
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+	Quest = Hero's "AGAcceptedQuest";
+
+	if ($IsValidGamePiece(Quest) == False)
+		begin
+			$Reset_Tasks(Hero);
+			return;
+		end
+	if ($UnitsAreSamePlayer(Hero, Quest's "AGGuild") == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Reset_Tasks(Hero);
+			return;
+		end
+
+	Kind = Quest's "AGQuestKind";
+	Destination = Quest's "AGDestination";
+	if (Kind == 4)
+		begin
+			if ($Adventurer_Guild_Chart_Arrived(Hero, Quest's "AGChartPoint"))
+				begin
+					Quest's "AGObjectiveComplete" = True;
+					if ($Adventurer_Guild_Assign_Return(Hero, Quest))
+						return;
+				end
+
+
+
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Reset_Tasks(Hero);
+			return;
+		end
+	if (Kind == 7)
+		begin
+			if ($Adventurer_Guild_Lair_Target_Valid(
+				Quest's "AGGuild",
+				Destination
+			) == False)
+				begin
+					$Adventurer_Guild_Fail_Quest(Quest);
+					$Reset_Tasks(Hero);
+					return;
+				end
+		end
+	else if ((Kind == 5) || (Kind == 8))
+		begin
+			if ($Adventurer_Guild_Two_Stop_Objectives_Valid(
+				Quest's "AGGuild",
+				Quest
+			) == False)
+				begin
+					$Adventurer_Guild_Fail_Quest(Quest);
+					$Reset_Tasks(Hero);
+					return;
+				end
+			if (Quest's "AGStage" == 1)
+				Destination = Quest's "AGDestination2";
+			else
+				if (Quest's "AGStage" != 0)
+					begin
+						$Adventurer_Guild_Fail_Quest(Quest);
+						$Reset_Tasks(Hero);
+						return;
+					end
+		end
+	else
+		if ($Adventurer_Guild_Destination_Valid(
+			Quest's "AGGuild",
+			Destination
+		) == False)
+			begin
+				$Adventurer_Guild_Fail_Quest(Quest);
+				$Reset_Tasks(Hero);
+				return;
+			end
+
+
+	if ($IsAdjacent(Hero, Destination) == False)
+		begin
+			Hero's "Target" = Hero;
+			Hero's "Destination" = $LocationOf(Destination);
+			Hero's "ActiveScript" = $Travel_To;
+			Hero's "BackScript" = $Adventurer_Guild_Dispatch_Outbound;
+			$Move(Hero, Hero's "Destination");
+			return;
+		end
+
+	if (((Kind == 5) || (Kind == 8)) && (Quest's "AGStage" == 0))
+		begin
+
+
+			Quest's "AGStage" = 1;
+			if ($Adventurer_Guild_Assign_Outbound(Hero, Quest) == False)
+				begin
+					$Adventurer_Guild_Fail_Quest(Quest);
+					$Reset_Tasks(Hero);
+				end
+			return;
+		end
+
+	Quest's "AGObjectiveComplete" = True;
+	if ((Kind == 7) || (Kind == 8))
+		$Adventurer_Guild_Clear_Combat_Target(
+			Quest's "AGDestination",
+			Quest's "AGGuild",
+			Hero
+		);
+	if ($Adventurer_Guild_Assign_Return(Hero, Quest) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Reset_Tasks(Hero);
+		end
+end
+
+
+function Adventurer_Guild_Resume(agent Hero) is boolean
+declare
+	agent Quest;
+	agent Guild;
+	agent Destination;
+	integer Kind;
+begin
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+	Quest = Hero's "AGAcceptedQuest";
+
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+	if (Quest's "AGClaimant" != Hero)
+		begin
+			Hero's "AGAcceptedQuest" = $NullAgent();
+			return False;
+		end
+	Guild = Quest's "AGGuild";
+	if ($IsValidGamePiece(Guild) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			return False;
+		end
+	if ($UnitsAreSamePlayer(Hero, Guild) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			return False;
+		end
+
+	Kind = Quest's "AGQuestKind";
+	if ((Kind >= 9) && (Kind <= 16))
+		return $Adventurer_Guild_Activity_Resume(Hero);
+	Destination = Quest's "AGDestination";
+	if (Kind == 4)
+		begin
+			if (Quest's "AGObjectiveComplete")
+				return $Adventurer_Guild_Assign_Return(Hero, Quest);
+			if ($Adventurer_Guild_Assign_Outbound(Hero, Quest))
+				return True;
+			$Adventurer_Guild_Fail_Quest(Quest);
+			return False;
+		end
+	if (Kind == 6)
+		begin
+			if (Quest's "AGObjectiveComplete")
+				return $Adventurer_Guild_Assign_Return(Hero, Quest);
+			if ($Adventurer_Guild_Treasure_Target_Valid(Guild, Destination) == False)
+				begin
+					$Adventurer_Guild_Fail_Quest(Quest);
+					return False;
+				end
+			return $Adventurer_Guild_Assign_Outbound(Hero, Quest);
+		end
+	if ((Kind == 2) || (Kind == 3) || (Kind == 7))
+		begin
+			if (Quest's "AGObjectiveComplete")
+				return $Adventurer_Guild_Assign_Return(Hero, Quest);
+			if ((Kind == 2) || (Kind == 7))
+				begin
+					if ($Adventurer_Guild_Lair_Target_Valid(
+						Guild,
+						Destination
+					) == False)
+						begin
+							$Adventurer_Guild_Fail_Quest(Quest);
+							return False;
+						end
+				end
+			else
+				begin
+					if ($Adventurer_Guild_Monster_Was_Zoo_Captured(
+						Guild,
+						Destination
+					))
+						return $Adventurer_Guild_Resolve_Zoo_Capture(Quest);
+					if ($Adventurer_Guild_Monster_Target_Valid(
+						Guild,
+						Destination
+					) == False)
+						begin
+							$Adventurer_Guild_Fail_Quest(Quest);
+							return False;
+						end
+				end
+			return $Adventurer_Guild_Assign_Outbound(Hero, Quest);
+		end
+	if ((Kind == 5) || (Kind == 8))
+		begin
+
+			if ((Kind == 8) && (Quest's "AGObjectiveComplete"))
+				return $Adventurer_Guild_Assign_Return(Hero, Quest);
+			if ($Adventurer_Guild_Two_Stop_Objectives_Valid(
+				Guild,
+				Quest
+			) == False)
+				begin
+					$Adventurer_Guild_Fail_Quest(Quest);
+					return False;
+				end
+			if (Quest's "AGStage" == 1)
+				Destination = Quest's "AGDestination2";
+			else
+				if (Quest's "AGStage" != 0)
+					begin
+						$Adventurer_Guild_Fail_Quest(Quest);
+						return False;
+					end
+		end
+	else
+		if ($Adventurer_Guild_Destination_Valid(Guild, Destination) == False)
+			begin
+				$Adventurer_Guild_Fail_Quest(Quest);
+				return False;
+			end
+
+	if (Quest's "AGObjectiveComplete")
+		return $Adventurer_Guild_Assign_Return(Hero, Quest);
+
+	return $Adventurer_Guild_Assign_Outbound(Hero, Quest);
+end
+
+
+function Adventurer_Guild_Resume_Application(agent Hero) is boolean
+declare
+	agent Guild;
+	agent Quest;
+begin
+	if (($HasAttribute("AGPendingGuild", Hero) == False) ||
+		($HasAttribute("AGPendingQuest", Hero) == False))
+		return False;
+
+	Guild = Hero's "AGPendingGuild";
+	if ($HasAttribute("AGXPendingKey", Hero))
+		if (Hero's "AGXPendingKey" > 0)
+			begin
+				if ($Adventurer_Guild_Activity_Start_Application(Guild, Hero's "AGXPendingKey", Hero))
+					return True;
+				$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+				return False;
+			end
+	Quest = Hero's "AGPendingQuest";
+	if (($Adventurer_Guild_Is_Open(Guild) == False) ||
+		($IsValidGamePiece(Quest) == False) ||
+		($AgentInList(Quest, Guild's "AGAvailableQuests") == False) ||
+		(Quest's "AGApplicant" != Hero) ||
+		($Adventurer_Guild_Quest_Executable(Hero, Guild, Quest) == False))
+		begin
+			$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+			return False;
+		end
+
+	return $Adventurer_Guild_Start_Application(Hero, Guild, Quest);
+end
+
+
+function Adventurer_Guild_Hero_Decision(agent Hero) is boolean
+
+
+
+declare
+begin
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+
+	if ($IsValidGamePiece(Hero's "AGAcceptedQuest"))
+		return $Adventurer_Guild_Resume(Hero);
+
+	if ($IsValidGamePiece(Hero's "AGPendingGuild"))
+		if ($Adventurer_Guild_Resume_Application(Hero))
+			return True;
+
+	return False;
+end
+
+
+function Adventurer_Guild_Hero_Consider(agent Hero) is boolean
+
+
+
+
+declare
+begin
+	return $Adventurer_Guild_Consider(Hero);
+end
+
+
+function Adventurer_Guild_Combat_Hero_Nearby(
+	agent Target,
+	agent Claimant
+) is boolean
+
+
+
+
+
+declare
+	list GuysNearby;
+	list Rangers;
+	list InvisibleHeroes;
+	list CamouflagedHeroes;
+	list HiddenHeroes;
+	agent Guy;
+begin
+	if ($IsValidGamePiece(Claimant) == False)
+		return False;
+	if ($IsDead(Claimant))
+		return False;
+
+	$ListObjects(Target, "hero", #gold_drop_radius, GuysNearby);
+	$ListObjects(
+		Target,
+		"hero",
+		#gold_drop_radius * 2,
+		Rangers,
+		#CheckTitles,
+		"Ranger"
+	);
+	foreach Guy in Rangers do
+		if ($DistanceBetweenAgents(Guy, Target) <=
+			$GetAttribute(Guy, #ATTRIB_MaxAttackRange))
+			if ($AgentInList(Guy, GuysNearby) == False)
+				GuysNearby << Guy;
+
+	$ListObjects(Target, "invisible", #gold_drop_radius, InvisibleHeroes);
+	$ListObjects(Target, "Camouflaged", #gold_drop_radius, CamouflagedHeroes);
+	HiddenHeroes = $AddLists(InvisibleHeroes, CamouflagedHeroes);
+	foreach Guy in HiddenHeroes do
+		if (Guy's "subtype" == "hero")
+			GuysNearby << Guy;
+
+	GuysNearby = $ListSubtypes(GuysNearby, "Hero");
+	return $AgentInList(Claimant, GuysNearby);
+end
+
+
+function Adventurer_Guild_Clear_Combat_Target(
+	agent Target,
+	agent Guild,
+	agent Hero
+)
+declare
+begin
+	if ($IsValidGamePiece(Target) == False)
+		return;
+	if (($HasAttribute("AGGuild", Target) == False) ||
+		($HasAttribute("AGClaimant", Target) == False))
+		return;
+	if ((Target's "AGGuild" != Guild) ||
+		(Target's "AGClaimant" != Hero))
+		return;
+
+	Target's "AGQuestKind" = 0;
+	Target's "AGGuild" = $NullAgent();
+	Target's "AGDestination" = $NullAgent();
+	Target's "AGDestination2" = $NullAgent();
+	Target's "AGStage" = 0;
+	Target's "AGClaimant" = $NullAgent();
+	Target's "AGApplicant" = $NullAgent();
+	Target's "AGObjectiveComplete" = False;
+	Target's "AGPaid" = False;
+	Target's "AGReward" = 0;
+end
+
+
+function Adventurer_Guild_Resolve_Zoo_Capture(agent Quest) is boolean
+
+
+
+
+
+declare
+	agent Guild;
+	agent Hero;
+	agent Target;
+begin
+	if (($IsValidGamePiece(Quest) == False) ||
+		($HasAttribute("AGQuestKind", Quest) == False) ||
+		(Quest's "AGQuestKind" != 3) ||
+		(Quest's "AGObjectiveComplete") ||
+		(Quest's "AGPaid"))
+		return False;
+
+	Guild = Quest's "AGGuild";
+	Hero = Quest's "AGClaimant";
+	Target = Quest's "AGDestination";
+	if (($IsValidGamePiece(Guild) == False) ||
+		($IsValidGamePiece(Hero) == False) ||
+		($IsDead(Hero)) ||
+		(Quest != Hero) ||
+		(Hero's "AGAcceptedQuest" != Quest) ||
+		($AgentInList(Quest, Guild's "AGActiveQuests") == False) ||
+		($Adventurer_Guild_Monster_Was_Zoo_Captured(
+			Guild,
+			Target
+		) == False))
+		return False;
+
+	if (($HasAttribute("AGQuestKind", Target) == False) ||
+		(Target's "AGQuestKind" != 3) ||
+		(Target's "AGGuild" != Guild) ||
+		(Target's "AGClaimant" != Hero))
+		return False;
+
+	if ($Adventurer_Guild_Combat_Hero_Nearby(Target, Hero) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			return False;
+		end
+
+
+
+	$DeleteEffector(Target, "Adventurer_Guild_Lair_Tracker");
+	$Adventurer_Guild_Clear_Combat_Target(Target, Guild, Hero);
+	Quest's "AGObjectiveComplete" = True;
+	$Adventurer_Guild_Publish_Rows(Guild);
+	if ($Adventurer_Guild_Assign_Return(Hero, Quest))
+		return True;
+
+	$Adventurer_Guild_Fail_Quest(Quest);
+	return False;
+end
+
+
+function Adventurer_Guild_Cleanse_Lair_Callback(agent Target)
+
+
+
+
+
+
+declare
+	agent Guild;
+	agent Hero;
+	agent Quest;
+	integer Kind;
+begin
+	if ($IsDead(Target) == False)
+		return;
+	if ($HasAttribute("AGXPestHero", Target))
+		if ($IsValidGamePiece(Target's "AGXPestHero"))
+			begin
+				$Adventurer_Guild_Pest_Defeated(Target);
+				return;
+			end
+	if (($HasAttribute("AGQuestKind", Target) == False) ||
+		($HasAttribute("AGGuild", Target) == False) ||
+		($HasAttribute("AGClaimant", Target) == False))
+		return;
+	Kind = Target's "AGQuestKind";
+	if ((Kind != 2) && (Kind != 3))
+		return;
+
+	Guild = Target's "AGGuild";
+	Hero = Target's "AGClaimant";
+	if (($IsValidGamePiece(Guild) == False) ||
+		($IsValidGamePiece(Hero) == False) ||
+		($IsDead(Hero)))
+		return;
+	if ($HasAttribute("AGAcceptedQuest", Hero) == False)
+		return;
+	Quest = Hero's "AGAcceptedQuest";
+	if (($IsValidGamePiece(Quest) == False) ||
+		(Quest != Hero) ||
+		($HasAttribute("AGQuestKind", Quest) == False) ||
+		(Quest's "AGQuestKind" != Kind) ||
+		(Quest's "AGGuild" != Guild) ||
+		(Quest's "AGClaimant" != Hero) ||
+		(Quest's "AGDestination" != Target) ||
+		($AgentInList(Quest, Guild's "AGActiveQuests") == False))
+		return;
+
+	if ($Adventurer_Guild_Combat_Hero_Nearby(Target, Hero))
+		begin
+			Quest's "AGObjectiveComplete" = True;
+			Target's "AGGuild" = $NullAgent();
+			Target's "AGClaimant" = $NullAgent();
+			$Adventurer_Guild_Publish_Rows(Guild);
+			if ($Adventurer_Guild_Assign_Return(Hero, Quest) == False)
+				$Adventurer_Guild_Fail_Quest(Quest);
+		end
+	else
+		$Adventurer_Guild_Fail_Quest(Quest);
+end
+
+
+function Adventurer_Guild_Detach_Quest(agent Quest)
+declare
+	agent Guild;
+	agent Hero;
+	agent Applicant;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return;
+	$Adventurer_Guild_Ensure_Quest_State(Quest);
+
+	Guild = Quest's "AGGuild";
+	Hero = Quest's "AGClaimant";
+	Applicant = Quest's "AGApplicant";
+	if ((Quest's "AGQuestKind" >= 9) && (Quest's "AGQuestKind" <= 16))
+		$Adventurer_Guild_Activity_Clear_Hero(Quest);
+
+	if ($IsValidGamePiece(Guild))
+		begin
+			if ($HasAttribute("AGAvailableQuests", Guild))
+				Guild's "AGAvailableQuests" -= Quest;
+			if ($HasAttribute("AGActiveQuests", Guild))
+				Guild's "AGActiveQuests" -= Quest;
+			if ($HasAttribute("AGRevision", Guild))
+				$Adventurer_Guild_Publish_Rows(Guild);
+		end
+
+	if ($IsValidGamePiece(Hero))
+		if ($HasAttribute("AGAcceptedQuest", Hero))
+			if (Hero's "AGAcceptedQuest" == Quest)
+				Hero's "AGAcceptedQuest" = $NullAgent();
+	if ($IsValidGamePiece(Applicant))
+		$Adventurer_Guild_Remove_Applicant(Guild, Applicant);
+
+	Quest's "AGGuild" = $NullAgent();
+	Quest's "AGDestination" = $NullAgent();
+	Quest's "AGDestination2" = $NullAgent();
+	Quest's "AGStage" = 0;
+	Quest's "AGClaimant" = $NullAgent();
+	Quest's "AGApplicant" = $NullAgent();
+	Quest's "AGObjectiveComplete" = False;
+	Quest's "AGPaid" = False;
+	Quest's "AGReward" = 0;
+end
+
+
+function Adventurer_Guild_Fail_Quest(agent Quest)
+declare
+	integer Kind;
+	agent Destination;
+	agent Guild;
+	agent Hero;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return;
+
+	$Adventurer_Guild_Ensure_Quest_State(Quest);
+	Kind = Quest's "AGQuestKind";
+	Destination = Quest's "AGDestination";
+	Guild = Quest's "AGGuild";
+	Hero = Quest's "AGClaimant";
+
+	if (((Kind == 2) || (Kind == 3)) && (Destination != Quest))
+		if ($IsValidGamePiece(Destination))
+			begin
+
+
+
+				if ($IsDead(Destination) == False)
+					$DeleteEffector(
+						Destination,
+						"Adventurer_Guild_Lair_Tracker"
+					);
+				$Adventurer_Guild_Clear_Combat_Target(
+					Destination,
+					Guild,
+					Hero
+				);
+			end
+
+
+	if (((Kind == 6) || (Kind == 7) || (Kind == 8)) && (Destination != Quest))
+		$Adventurer_Guild_Clear_Combat_Target(Destination, Guild, Hero);
+
+	$Adventurer_Guild_Detach_Quest(Quest);
+
+
+
+	if (Quest's "type" == "RewardFlag")
+		$DeleteGamePiece(Quest);
+end
+
+
+function Adventurer_Guild_Repost_On_Hero_Death(agent Hero, agent Quest) is boolean
+
+
+
+
+declare
+	agent Guild;
+	agent Destination;
+	agent Destination2;
+	integer Kind;
+	integer Reward;
+	integer RowKey;
+	string Name;
+	string Goal;
+	coordinate Point;
+begin
+	if ($IsValidGamePiece(Quest) == False)
+		return False;
+	$Adventurer_Guild_Ensure_Quest_State(Quest);
+	Guild = Quest's "AGGuild";
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	if ($IsDead(Guild))
+		return False;
+	if ((Quest's "AGClaimant" != Hero) ||
+		(Hero's "AGAcceptedQuest" != Quest) ||
+		($UnitsAreSamePlayer(Hero, Guild) == False))
+		return False;
+	if ($AgentInList(Quest, Guild's "AGActiveQuests") == False)
+		return False;
+	if ((Quest's "AGObjectiveComplete") || (Quest's "AGPaid"))
+		return False;
+	if ($Adventurer_Guild_Active_Quest_Valid(Guild, Quest) == False)
+		return False;
+
+	Kind = Quest's "AGQuestKind";
+	if ((Kind >= 9) && (Kind <= 16))
+		return $Adventurer_Guild_Activity_Repost(Hero);
+	Destination = Quest's "AGDestination";
+	if (Kind == 4)
+		begin
+			Point = Quest's "AGChartPoint";
+			if ($Adventurer_Guild_Chart_Unexplored(Guild, Point) == False)
+				return False;
+			RowKey = Quest's "AGRowKey";
+			$Adventurer_Guild_Fail_Quest(Quest);
+			Guild's "AGChartKeys" << RowKey;
+			Guild's "AGChartPoints" << Point;
+			$Adventurer_Guild_Chart_Sync_Head(Guild);
+			$Adventurer_Guild_Publish_Rows(Guild);
+			return True;
+		end
+
+
+	if (Kind == 3)
+		if ($Adventurer_Guild_Monster_Target_Valid(Guild, Destination) == False)
+			return False;
+	if (Kind == 7)
+		if ($Adventurer_Guild_Scout_Offer_Valid(Guild, Destination) == False)
+			return False;
+	if ((Kind == 2) || (Kind == 3) || (Kind == 6) || (Kind == 7) || (Kind == 8))
+		begin
+			if (Quest != Hero)
+				return False;
+			if (($HasAttribute("AGGuild", Destination) == False) ||
+				($HasAttribute("AGClaimant", Destination) == False))
+				return False;
+			if ((Destination's "AGGuild" != Guild) ||
+				(Destination's "AGClaimant" != Hero))
+				return False;
+		end
+	else
+		if (Quest != Destination)
+			return False;
+	if ($AgentInList(Destination, Guild's "AGAvailableQuests"))
+		return False;
+
+
+
+
+	Destination2 = Quest's "AGDestination2";
+	Reward = Quest's "AGReward";
+	RowKey = Quest's "AGRowKey";
+	Name = Quest's "AGName";
+	Goal = Quest's "AGGoal";
+	$Adventurer_Guild_Fail_Quest(Quest);
+
+
+
+	$Adventurer_Guild_Ensure_Quest_State(Destination);
+	Destination's "AGQuestKind" = Kind;
+	Destination's "AGRowKey" = RowKey;
+	Destination's "AGGuild" = Guild;
+	Destination's "AGDestination" = Destination;
+	Destination's "AGDestination2" = Destination2;
+	Destination's "AGStage" = 0;
+	Destination's "AGClaimant" = $NullAgent();
+	Destination's "AGApplicant" = $NullAgent();
+	Destination's "AGObjectiveComplete" = False;
+	Destination's "AGPaid" = False;
+	Destination's "AGName" = Name;
+	Destination's "AGGoal" = Goal;
+	Destination's "AGReward" = Reward;
+
+	Guild's "AGAvailableQuests" << Destination;
+	$Adventurer_Guild_Publish_Rows(Guild);
+	return True;
+end
+
+
+function Adventurer_Guild_Complete_Return(agent Hero, agent Guild)
+declare
+	agent Quest;
+	integer Reward;
+begin
+	Quest = Hero's "AGAcceptedQuest";
+
+	if ($IsValidGamePiece(Quest) == False)
+		begin
+			$Exit_Building(Hero, Guild);
+			return;
+		end
+
+	if ((Quest's "AGGuild" != Guild) ||
+		(Quest's "AGClaimant" != Hero) ||
+		($UnitsAreSamePlayer(Hero, Guild) == False) ||
+		(Quest's "AGObjectiveComplete" == False) ||
+		(Quest's "AGPaid") ||
+		($AgentInList(Quest, Guild's "AGActiveQuests") == False))
+		begin
+			$Adventurer_Guild_Fail_Quest(Quest);
+			$Exit_Building(Hero, Guild);
+			return;
+		end
+
+	Reward = Quest's "AGReward";
+
+
+	Quest's "AGPaid" = True;
+	$Adventurer_Guild_Detach_Quest(Quest);
+	$Give_Gold(Hero, Reward);
+	$PlaySound(Guild, "completed_reward", "begin");
+	$Exit_Building(Hero, Guild);
+end
+
+
+function Adventurer_Guild_Hero_Reset(agent Hero)
+
+
+
+
+declare
+	agent Guild;
+begin
+
+	if (Hero's "type" != "hero")
+		return;
+
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+	Guild = Hero's "AGPendingGuild";
+	if ($IsValidGamePiece(Guild))
+		$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+	else
+		Hero's "AGPendingGuild" = $NullAgent();
+end
+
+
+function Adventurer_Guild_Hero_Death(agent Hero)
+
+
+
+declare
+	agent Guild;
+	agent Quest;
+begin
+
+	if (Hero's "type" != "hero")
+		return;
+
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+
+	Guild = Hero's "AGPendingGuild";
+	if ($IsValidGamePiece(Guild))
+		$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+	else
+		Hero's "AGPendingGuild" = $NullAgent();
+
+	Quest = Hero's "AGAcceptedQuest";
+	if ($IsValidGamePiece(Quest))
+		begin
+			if ($Adventurer_Guild_Repost_On_Hero_Death(Hero, Quest) == False)
+				$Adventurer_Guild_Fail_Quest(Quest);
+		end
+	else
+		Hero's "AGAcceptedQuest" = $NullAgent();
+end
+
+
+function Adventurer_Guild_Destroyed(agent Guild)
+declare
+	list Active;
+	agent Hero;
+begin
+	$Adventurer_Guild_Ensure_Guild_State(Guild);
+
+
+
+	$Adventurer_Guild_Delete_Available(Guild);
+	Active = Guild's "AGActiveQuests";
+	foreach Hero in Active do
+		if ($IsValidGamePiece(Hero))
+			if ((Hero's "AGQuestKind" >= 9) && (Hero's "AGQuestKind" <= 16))
+				$Adventurer_Guild_Fail_Quest(Hero);
+	$Building_Death(Guild);
+end
+
+
+
+
+
+
+
+
+
+function Adventurer_Guild_UI_Offer_Count(agent Guild) is integer
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return 0;
+	if ($HasAttribute("AGUIRowKeys", Guild) == False)
+		return 0;
+	return $ListSize(Guild's "AGUIRowKeys");
+end
+
+function Adventurer_Guild_UI_Offer_Key(agent Guild, integer Row) is integer
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return 0;
+	if ($HasAttribute("AGUIRowKeys", Guild) == False)
+		return 0;
+	if ((Row < 1) || (Row > $ListSize(Guild's "AGUIRowKeys")))
+		return 0;
+	return $ListMember(Guild's "AGUIRowKeys", Row);
+end
+
+
+function Adventurer_Guild_UI_Offer_At(agent Guild, integer Row) is agent
+declare
+	agent Quest;
+begin
+	Quest = $NullAgent();
+	if ($IsValidGamePiece(Guild) == False)
+		return Quest;
+	if ($HasAttribute("AGAvailableQuests", Guild) == False)
+		return Quest;
+	if (Row < 1)
+		return Quest;
+	if (Row > $ListSize(Guild's "AGAvailableQuests"))
+		return Quest;
+
+	Quest = $ListMember(Guild's "AGAvailableQuests", Row);
+	if ($IsValidGamePiece(Quest) == False)
+		return $NullAgent();
+	return Quest;
+end
+
+function Adventurer_Guild_UI_Offer_Agent_Id(
+	agent Guild,
+	integer Row
+) is integer
+declare
+	agent Quest;
+begin
+	Quest = $Adventurer_Guild_UI_Offer_At(Guild, Row);
+	if ($IsValidGamePiece(Quest) == False)
+		return 0;
+	return $GetAttribute(Quest, #ATTRIB_AgentID);
+end
+
+function Adventurer_Guild_UI_Offer_Reward(agent Guild, integer Row) is integer
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return 0;
+	if ($HasAttribute("AGUIRowRewards", Guild) == False)
+		return 0;
+	if ((Row < 1) || (Row > $ListSize(Guild's "AGUIRowRewards")))
+		return 0;
+	return $ListMember(Guild's "AGUIRowRewards", Row);
+end
+
+function Adventurer_Guild_UI_Offer_Variant(agent Guild, integer Row) is integer
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return 0;
+	if ($HasAttribute("AGUIRowKinds", Guild) == False)
+		return 0;
+	if ((Row < 1) || (Row > $ListSize(Guild's "AGUIRowKinds")))
+		return 0;
+	return $ListMember(Guild's "AGUIRowKinds", Row);
+end
+
+function Adventurer_Guild_UI_Revision(agent Guild) is integer
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return 0;
+	if ($HasAttribute("AGRevision", Guild) == False)
+		return 0;
+	return Guild's "AGRevision";
+end
+
+function Adventurer_Guild_UI_Selected_Action_Cost(agent Quest) is integer
+declare
+begin
+
+
+	if ($IsValidGamePiece(Quest) == False)
+		return 0;
+	return 0;
+end
+
+function Adventurer_Guild_Find_Offer_Guild(agent Quest) is agent
+declare
+	list Guilds;
+	agent Guild;
+	agent QuestGuild;
+begin
+	QuestGuild = $NullAgent();
+	if ($IsValidGamePiece(Quest) == False)
+		return QuestGuild;
+
+	$ListObjects(Quest, "building", -1, Guilds, #MyPlayer);
+	Guilds = $ListCompleted(Guilds);
+	Guilds = $ListTitles(Guilds, "Adventurer_Guild");
+
+	foreach Guild in Guilds do
+		if ($HasAttribute("AGAvailableQuests", Guild))
+			if ($AgentInList(Quest, Guild's "AGAvailableQuests"))
+				QuestGuild = Guild;
+
+	return QuestGuild;
+end
+
+function Adventurer_Guild_UI_Reject(agent Quest) is boolean
+declare
+	agent Guild;
+begin
+	if ($IsValidGamePiece(Quest))
+		if (Quest's "title" == "Adventurer_Guild")
+			begin
+				$Adventurer_Guild_Ensure_Guild_State(Quest);
+				Quest's "AGProofOfferVisible" = False;
+				$Adventurer_Guild_Publish_Rows(Quest);
+				return True;
+			end
+
+	Guild = $Adventurer_Guild_Find_Offer_Guild(Quest);
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+
+	Guild's "AGAvailableQuests" -= Quest;
+	Guild's "AGProofOfferVisible" = False;
+	$Adventurer_Guild_Publish_Rows(Guild);
+	return True;
+end
+
+function Adventurer_Guild_UI_Refresh_Cost(agent Guild) is integer
+
+
+
+
+declare
+begin
+	if ($Adventurer_Guild_UI_Can_Refresh(Guild) == 0)
+		return 0;
+	return 500;
+end
+
+function Adventurer_Guild_UI_Can_Refresh(agent Guild) is integer
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return 0;
+	if ($IsDead(Guild))
+		return 0;
+	if (Guild's "title" != "Adventurer_Guild")
+		return 0;
+	if ($GetAttribute(Guild, #ATTRIB_FirstStageBuilt) != 1)
+		return 0;
+	if ($HasAttribute("AGAvailableQuests", Guild) == False)
+		return 0;
+	return 1;
+end
+
+function Adventurer_Guild_UI_Refresh_After_Debit(agent Guild) is boolean
+
+
+
+
+
+declare
+begin
+	if ($Adventurer_Guild_UI_Can_Refresh(Guild) == 0)
+		return False;
+	return $Adventurer_Guild_Refresh_Offers(Guild);
+end

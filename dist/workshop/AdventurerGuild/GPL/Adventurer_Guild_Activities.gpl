@@ -1,0 +1,1987 @@
+
+
+
+
+
+
+expression #AGX_Pest_Radius 2000
+expression #AGX_Trade_Min_Distance 600
+expression #AGX_Duty_Days 1
+
+
+
+
+function Adventurer_Guild_Support_Rates_Compatible(
+	integer FollowerRate, integer TargetRate, integer Ceiling
+) is boolean
+declare
+begin
+	return ((TargetRate > 0) && (Ceiling > TargetRate) &&
+		(FollowerRate > TargetRate));
+end
+
+function Adventurer_Guild_Support_Speed_Ceiling() is integer
+declare
+	integer RangerRate, ElfRate, AdeptRate, Ceiling;
+begin
+
+
+
+
+
+	RangerRate = $MM_UnitTypeMovementRate("Ranger");
+	ElfRate = $MM_UnitTypeMovementRate("Elf");
+	AdeptRate = $MM_UnitTypeMovementRate("Adept");
+	if ((RangerRate <= 0) || (ElfRate <= 0) || (AdeptRate <= 0))
+		return 0;
+	Ceiling = RangerRate;
+	if (ElfRate < Ceiling)
+		Ceiling = ElfRate;
+	if (AdeptRate < Ceiling)
+		Ceiling = AdeptRate;
+	return Ceiling;
+end
+
+function Adventurer_Guild_Support_Hero_Valid(agent Guild, agent Hero) is boolean
+declare
+begin
+	if ($Adventurer_Guild_Activity_Own_Living(Guild, Hero) == False)
+		return False;
+
+
+	return ((Hero's "type" == "hero") && (Hero's "subtype" == "hero"));
+end
+
+function Adventurer_Guild_Support_Free_Follower(agent Guild, agent Hero) is boolean
+declare
+begin
+	if ($Adventurer_Guild_Support_Hero_Valid(Guild, Hero) == False)
+		return False;
+	if ($HasAttribute("AGAcceptedQuest", Hero))
+		if ($IsValidGamePiece(Hero's "AGAcceptedQuest"))
+			return False;
+	return True;
+end
+
+function Adventurer_Guild_Support_Applicant_From_Rates(
+	agent Guild, agent Hero, agent Target,
+	integer FollowerRate, integer TargetRate, integer Ceiling
+) is boolean
+declare
+begin
+	if (Hero == Target)
+		return False;
+	if ($Adventurer_Guild_Support_Hero_Valid(Guild, Hero) == False)
+		return False;
+	if ($Adventurer_Guild_Support_Hero_Valid(Guild, Target) == False)
+		return False;
+	return $Adventurer_Guild_Support_Rates_Compatible(FollowerRate, TargetRate, Ceiling);
+end
+
+function Adventurer_Guild_Support_Target_From_Rates(
+	agent Guild, list Heroes, list NormalRates, integer Ceiling, list BusyTargets
+) is agent
+declare
+	agent Hero;
+	list Candidates;
+	integer Index, Rate, Fastest;
+begin
+	if (($ListSize(Heroes) != $ListSize(NormalRates)) || (Ceiling <= 0))
+		return $NullAgent();
+
+
+
+	Index = 1;
+	Fastest = 0;
+	foreach Hero in Heroes do
+		begin
+			Rate = $ListMember(NormalRates, Index);
+			if ($Adventurer_Guild_Support_Free_Follower(Guild, Hero))
+				if (Rate > Fastest)
+					Fastest = Rate;
+			Index += 1;
+		end
+	Index = 1;
+	foreach Hero in Heroes do
+		begin
+			Rate = $ListMember(NormalRates, Index);
+			if ($Adventurer_Guild_Support_Hero_Valid(Guild, Hero))
+				if ($Adventurer_Guild_Support_Rates_Compatible(Fastest, Rate, Ceiling))
+					if ($AgentInList(Hero, BusyTargets) == False)
+						if ($Adventurer_Guild_Target_In_Use(Guild, Hero) == False)
+							Candidates << Hero;
+			Index += 1;
+		end
+	return $pick_closest(Guild, Candidates);
+end
+
+
+
+
+function Adventurer_Guild_Support_Busy_Targets(agent Guild, boolean IncludeOffers) is list
+declare
+	list Buildings, Guilds, Busy;
+	agent OtherGuild, Hero, Target;
+	integer Index, Key;
+begin
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Guilds = $ListTitles(Buildings, "Adventurer_Guild");
+	foreach OtherGuild in Guilds do
+		if ($Adventurer_Guild_Activity_Own_Living(Guild, OtherGuild))
+			begin
+				if (IncludeOffers && $HasAttribute("AGXKeys", OtherGuild))
+					begin
+						Index = 1;
+						while (Index <= $ListSize(OtherGuild's "AGXKeys")) do
+							begin
+								if ($ListMember(OtherGuild's "AGXKinds", Index) == 10)
+									begin
+										Key = $ListMember(OtherGuild's "AGXKeys", Index);
+										Target = $Adventurer_Guild_Activity_Target(OtherGuild, Key, 1);
+										if ($IsValidGamePiece(Target))
+											Busy << Target;
+									end
+								Index += 1;
+							end
+					end
+				if ($HasAttribute("AGActiveQuests", OtherGuild))
+					foreach Hero in OtherGuild's "AGActiveQuests" do
+						if ($IsValidGamePiece(Hero))
+							if ($HasAttribute("AGAcceptedQuest", Hero))
+								if ((Hero's "AGAcceptedQuest" == Hero) &&
+									(Hero's "AGQuestKind" == 10) &&
+									(Hero's "AGGuild" == OtherGuild) && (Hero's "AGPaid" == False))
+									Busy << Hero's "AGDestination";
+			end
+	return Busy;
+end
+
+function Adventurer_Guild_Support_Applicant(agent Guild, agent Hero, agent Target) is boolean
+declare
+	integer FollowerRate, TargetRate, Ceiling;
+	list BusyTargets;
+begin
+	if ($Adventurer_Guild_Support_Hero_Valid(Guild, Hero) == False)
+		return False;
+	if ($Adventurer_Guild_Support_Hero_Valid(Guild, Target) == False)
+		return False;
+
+
+	BusyTargets = $Adventurer_Guild_Support_Busy_Targets(Guild, False);
+	if ($AgentInList(Target, BusyTargets))
+		return False;
+	FollowerRate = $MM_UnitMovementRate(Hero, 0);
+	TargetRate = $MM_UnitMovementRate(Target, 0);
+	Ceiling = $Adventurer_Guild_Support_Speed_Ceiling();
+	return $Adventurer_Guild_Support_Applicant_From_Rates(
+		Guild, Hero, Target, FollowerRate, TargetRate, Ceiling);
+end
+
+function Adventurer_Guild_Support_Target(agent Guild) is agent
+declare
+	list Heroes, NormalRates, BusyTargets;
+	agent Hero;
+	integer Rate, Ceiling;
+begin
+	Ceiling = $Adventurer_Guild_Support_Speed_Ceiling();
+	if (Ceiling <= 0)
+		return $NullAgent();
+	$ListObjects(Guild, "hero", -1, Heroes, #MyPlayer);
+	BusyTargets = $Adventurer_Guild_Support_Busy_Targets(Guild, True);
+
+
+	foreach Hero in Heroes do
+		begin
+			Rate = 0;
+			if ($Adventurer_Guild_Support_Hero_Valid(Guild, Hero))
+				Rate = $MM_UnitMovementRate(Hero, 0);
+			NormalRates << Rate;
+		end
+	return $Adventurer_Guild_Support_Target_From_Rates(Guild, Heroes, NormalRates, Ceiling, BusyTargets);
+end
+
+function Adventurer_Guild_Activities_Ready(integer Kind) is boolean
+declare
+begin
+
+
+	return ((Kind >= 9) && (Kind <= 16));
+end
+
+function Adventurer_Guild_Activities_Batch_Ready() is boolean
+declare
+	integer Kind;
+	boolean Ready;
+begin
+	Kind = 9;
+	Ready = True;
+	while (Kind <= 16) do
+		begin
+			if ($Adventurer_Guild_Activities_Ready(Kind) == False)
+				Ready = False;
+			Kind += 1;
+		end
+	return Ready;
+end
+
+function Adventurer_Guild_Activities_Try_Kind(agent Guild, integer Kind) is boolean
+declare
+	agent Quest;
+	list Candidates;
+begin
+	if (Kind >= 9)
+		return $Adventurer_Guild_Activity_Create(Guild, Kind);
+	if (Kind == 4)
+		return $Adventurer_Guild_Create_Chart(Guild);
+	if (Kind == 2)
+		Quest = $Adventurer_Guild_Create_Cleanse_Den(Guild);
+	else if (Kind == 3)
+		Quest = $Adventurer_Guild_Create_Monster_Bounty(Guild);
+	else if (Kind == 5)
+		Quest = $Adventurer_Guild_Create_Supply_Run(Guild);
+	else if (Kind == 6)
+		begin
+			Candidates = $Adventurer_Guild_Treasure_Candidates(Guild);
+			Quest = $Adventurer_Guild_Create_Treasure(Guild, Candidates);
+		end
+	else if (Kind == 7)
+		Quest = $Adventurer_Guild_Create_Scout(Guild);
+	else if (Kind == 8)
+		Quest = $Adventurer_Guild_Create_Patrol(Guild);
+	return $IsValidGamePiece(Quest);
+end
+
+function Adventurer_Guild_Activities_Refresh(agent Guild) is boolean
+declare
+	list Kinds, Buildings, Candidates;
+	integer Kind, Pick, Posted, SpecialLimit;
+	agent Building, Quest;
+begin
+	$Adventurer_Guild_Delete_Available(Guild);
+	Guild's "AGProofOfferVisible" = True;
+
+
+
+	Kind = 2;
+	while (Kind <= 16) do
+		begin
+			Kinds << Kind;
+			Kind += 1;
+		end
+	Posted = 0;
+	SpecialLimit = #Adventurer_Guild_Offers_Per_Refresh;
+	if ($RandomNumber(2) == 0)
+		SpecialLimit -= 1;
+	while (($ListSize(Kinds) > 0) && (Posted < SpecialLimit)) do
+		begin
+			Pick = $RandomNumber($ListSize(Kinds)) + 1;
+			Kind = $ListMember(Kinds, Pick);
+			Kinds -= Kind;
+			if ($Adventurer_Guild_Activities_Try_Kind(Guild, Kind))
+				Posted += 1;
+		end
+	if (Posted < #Adventurer_Guild_Offers_Per_Refresh)
+		begin
+			$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+			Buildings = $ListCompleted(Buildings);
+			foreach Building in Buildings do
+				if (Building's "title" != "Adventurer_Guild")
+					if ($Adventurer_Guild_Target_In_Use(Guild, Building) == False)
+						Candidates << Building;
+			if ($ListSize(Candidates) > 0)
+				begin
+					Pick = $RandomNumber($ListSize(Candidates)) + 1;
+					Building = $ListMember(Candidates, Pick);
+					Quest = $Adventurer_Guild_Create_Dispatch(Guild, Building, 1);
+					if ($IsValidGamePiece(Quest))
+						Posted += 1;
+				end
+		end
+
+
+	while (($ListSize(Kinds) > 0) && (Posted < #Adventurer_Guild_Offers_Per_Refresh)) do
+		begin
+			Pick = $RandomNumber($ListSize(Kinds)) + 1;
+			Kind = $ListMember(Kinds, Pick);
+			Kinds -= Kind;
+			if ($Adventurer_Guild_Activities_Try_Kind(Guild, Kind))
+				Posted += 1;
+		end
+	$Adventurer_Guild_Publish_Rows(Guild);
+	return True;
+end
+
+function Adventurer_Guild_Activities_Ensure(agent Guild)
+declare
+begin
+	if ($HasAttribute("AGXKeys", Guild) == False)
+		$AddAttribute(Guild, "AGXKeys", "list");
+	if ($HasAttribute("AGXKinds", Guild) == False)
+		$AddAttribute(Guild, "AGXKinds", "list");
+	if ($HasAttribute("AGXRewards", Guild) == False)
+		$AddAttribute(Guild, "AGXRewards", "list");
+
+	if ($HasAttribute("AGXTargetKeys", Guild) == False)
+		$AddAttribute(Guild, "AGXTargetKeys", "list");
+	if ($HasAttribute("AGXTargetSlots", Guild) == False)
+		$AddAttribute(Guild, "AGXTargetSlots", "list");
+	if ($HasAttribute("AGXTargets", Guild) == False)
+		$AddAttribute(Guild, "AGXTargets", "list");
+	if ($HasAttribute("AGXDoneKeys", Guild) == False)
+		$AddAttribute(Guild, "AGXDoneKeys", "list");
+	if ($HasAttribute("AGXDoneSlots", Guild) == False)
+		$AddAttribute(Guild, "AGXDoneSlots", "list");
+	if ($HasAttribute("AGXCancelHeroes", Guild) == False)
+		$AddAttribute(Guild, "AGXCancelHeroes", "list");
+	if ($HasAttribute("AGXCancelTokens", Guild) == False)
+		$AddAttribute(Guild, "AGXCancelTokens", "list");
+end
+
+function Adventurer_Guild_Activity_Ensure_Hero(agent Hero)
+declare
+begin
+	$Adventurer_Guild_Ensure_Hero_State(Hero);
+	$Adventurer_Guild_Ensure_Quest_State(Hero);
+	if ($HasAttribute("AGXPendingKey", Hero) == False)
+		$AddAttribute(Hero, "AGXPendingKey", "integer", 0);
+	if ($HasAttribute("AGXClaimToken", Hero) == False)
+		$AddAttribute(Hero, "AGXClaimToken", "integer", 0);
+	if ($HasAttribute("AGXNextClaimToken", Hero) == False)
+		$AddAttribute(Hero, "AGXNextClaimToken", "integer", 1);
+	if ($HasAttribute("AGDestination3", Hero) == False)
+		$AddAttribute(Hero, "AGDestination3", "agentref");
+	if ($HasAttribute("AGXPotionKinds", Hero) == False)
+		$AddAttribute(Hero, "AGXPotionKinds", "list");
+	if ($HasAttribute("AGXPestDone", Hero) == False)
+		$AddAttribute(Hero, "AGXPestDone", "list");
+	if ($HasAttribute("AGXJoined", Hero) == False)
+		$AddAttribute(Hero, "AGXJoined", "boolean", False);
+	if ($HasAttribute("AGXDurationStarted", Hero) == False)
+		$AddAttribute(Hero, "AGXDurationStarted", "boolean", False);
+	if ($HasAttribute("AGXDurationCancelled", Hero) == False)
+		$AddAttribute(Hero, "AGXDurationCancelled", "boolean", False);
+end
+
+function Adventurer_Guild_Activity_Index(agent Guild, integer Key) is integer
+declare
+	integer Index;
+begin
+	if (($IsValidGamePiece(Guild) == False) || (Key <= 0))
+		return 0;
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	Index = 1;
+	while (Index <= $ListSize(Guild's "AGXKeys")) do
+		begin
+			if ($ListMember(Guild's "AGXKeys", Index) == Key)
+				return Index;
+			Index += 1;
+		end
+	return 0;
+end
+
+function Adventurer_Guild_Activity_Target(agent Guild, integer Key, integer Slot) is agent
+declare
+	integer Index;
+begin
+	Index = 1;
+	while (Index <= $ListSize(Guild's "AGXTargetKeys")) do
+		begin
+			if (($ListMember(Guild's "AGXTargetKeys", Index) == Key) &&
+				($ListMember(Guild's "AGXTargetSlots", Index) == Slot))
+				return $ListMember(Guild's "AGXTargets", Index);
+			Index += 1;
+		end
+	return $NullAgent();
+end
+
+function Adventurer_Guild_Activity_Add_Target(agent Guild, integer Key, integer Slot, agent Target)
+declare
+begin
+	if ($IsValidGamePiece(Target))
+		begin
+			Guild's "AGXTargetKeys" << Key;
+			Guild's "AGXTargetSlots" << Slot;
+			Guild's "AGXTargets" << Target;
+		end
+end
+
+function Adventurer_Guild_Activity_Remove(agent Guild, integer Key)
+declare
+	list Keys, Kinds, Rewards, TargetKeys, Slots, Targets, DoneKeys, DoneSlots;
+	integer Index;
+begin
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	Index = 1;
+	while (Index <= $ListSize(Guild's "AGXKeys")) do
+		begin
+			if ($ListMember(Guild's "AGXKeys", Index) != Key)
+				begin
+					Keys << $ListMember(Guild's "AGXKeys", Index);
+					Kinds << $ListMember(Guild's "AGXKinds", Index);
+					Rewards << $ListMember(Guild's "AGXRewards", Index);
+				end
+			Index += 1;
+		end
+	Index = 1;
+	while (Index <= $ListSize(Guild's "AGXTargetKeys")) do
+		begin
+			if ($ListMember(Guild's "AGXTargetKeys", Index) != Key)
+				begin
+					TargetKeys << $ListMember(Guild's "AGXTargetKeys", Index);
+					Slots << $ListMember(Guild's "AGXTargetSlots", Index);
+					Targets << $ListMember(Guild's "AGXTargets", Index);
+				end
+			Index += 1;
+		end
+	Guild's "AGXKeys" = Keys;
+	Guild's "AGXKinds" = Kinds;
+	Guild's "AGXRewards" = Rewards;
+	Guild's "AGXTargetKeys" = TargetKeys;
+	Guild's "AGXTargetSlots" = Slots;
+	Guild's "AGXTargets" = Targets;
+	Index = 1;
+	while (Index <= $ListSize(Guild's "AGXDoneKeys")) do
+		begin
+			if ($ListMember(Guild's "AGXDoneKeys", Index) != Key)
+				begin
+					DoneKeys << $ListMember(Guild's "AGXDoneKeys", Index);
+					DoneSlots << $ListMember(Guild's "AGXDoneSlots", Index);
+				end
+			Index += 1;
+		end
+	Guild's "AGXDoneKeys" = DoneKeys;
+	Guild's "AGXDoneSlots" = DoneSlots;
+end
+
+function Adventurer_Guild_Activities_Clear(agent Guild)
+declare
+	list Empty, Applicants;
+	agent Hero;
+begin
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	Applicants = Guild's "AGApplicants";
+	foreach Hero in Applicants do
+		if ($IsValidGamePiece(Hero))
+			if ($HasAttribute("AGXPendingKey", Hero))
+				if (Hero's "AGXPendingKey" > 0)
+					$Adventurer_Guild_Remove_Applicant(Guild, Hero);
+	Guild's "AGXKeys" = Empty;
+	Guild's "AGXKinds" = Empty;
+	Guild's "AGXRewards" = Empty;
+	Guild's "AGXTargetKeys" = Empty;
+	Guild's "AGXTargetSlots" = Empty;
+	Guild's "AGXTargets" = Empty;
+	Guild's "AGXDoneKeys" = Empty;
+	Guild's "AGXDoneSlots" = Empty;
+end
+
+function Adventurer_Guild_Activity_Own_Living(agent Guild, agent Target) is boolean
+declare
+begin
+	if ($IsValidGamePiece(Target) == False)
+		return False;
+	if ($IsDead(Target))
+		return False;
+	return $UnitsAreSamePlayer(Guild, Target);
+end
+
+function Adventurer_Guild_Activity_Building(agent Guild, agent Target, string Title) is boolean
+declare
+begin
+	if ($Adventurer_Guild_Activity_Own_Living(Guild, Target) == False)
+		return False;
+	if ((Target's "type" != "building") || (Target's "title" != Title))
+		return False;
+	return ($GetAttribute(Target, #ATTRIB_FirstStageBuilt) == 1);
+end
+
+function Adventurer_Guild_Activity_Flag_Valid(agent Guild, agent Flag) is boolean
+declare
+	agent Target;
+begin
+	if ($Adventurer_Guild_Activity_Own_Living(Guild, Flag) == False)
+		return False;
+	if (Flag's "type" != "RewardFlag")
+		return False;
+	if (Flag's "title" == "flag_explore")
+		return True;
+	if (Flag's "title" != "flag_attack")
+		return False;
+	Target = $AgentNumber($GetAttribute(Flag, #ATTRIB_TargetID));
+	if ($IsValidGamePiece(Target) == False)
+		return False;
+	if ($IsDead(Target))
+		return False;
+	return ($GetPlayerTeamNumber(Guild) != $GetPlayerTeamNumber(Target));
+end
+
+function Adventurer_Guild_Activity_Objectives_Valid(
+	agent Guild, integer Kind, agent First, agent Second, agent Third
+) is boolean
+declare
+begin
+	if (Kind == 13)
+		return True;
+	if (Kind == 9)
+		return $Adventurer_Guild_Activity_Flag_Valid(Guild, First);
+	if (Kind == 12)
+		return ($Adventurer_Guild_Monster_Target_Valid(Guild, First) &&
+			$Adventurer_Guild_Monster_Target_Valid(Guild, Second) &&
+			$Adventurer_Guild_Monster_Target_Valid(Guild, Third) &&
+			(First != Second) && (First != Third) && (Second != Third));
+	if (Kind == 14)
+		return $Adventurer_Guild_Patrol_Building_Valid(Guild, First);
+	if (Kind == 15)
+		return $Adventurer_Guild_Activity_Building(Guild, First, "Fairgrounds");
+	if (Kind == 16)
+		return ($Adventurer_Guild_Activity_Building(Guild, First, "Trading_Post") &&
+			$Adventurer_Guild_Activity_Building(Guild, Second, "Marketplace"));
+	if ($Adventurer_Guild_Activity_Own_Living(Guild, First) == False)
+		return False;
+	if (Kind == 10)
+		return (First's "type" == "hero");
+	if (Kind == 11)
+		return (First's "title" == "Caravan");
+	return False;
+end
+
+function Adventurer_Guild_Activity_Offer_Valid(agent Guild, integer Key) is boolean
+declare
+	integer Index, Kind;
+	list Done;
+begin
+	Index = $Adventurer_Guild_Activity_Index(Guild, Key);
+	if (Index == 0)
+		return False;
+	Kind = $ListMember(Guild's "AGXKinds", Index);
+	if (Kind == 12)
+		begin
+			Index = 1;
+			while (Index <= $ListSize(Guild's "AGXDoneKeys")) do
+				begin
+					if ($ListMember(Guild's "AGXDoneKeys", Index) == Key)
+						Done << $ListMember(Guild's "AGXDoneSlots", Index);
+					Index += 1;
+				end
+			return $Adventurer_Guild_Pests_Valid(Guild,
+				$Adventurer_Guild_Activity_Target(Guild, Key, 1),
+				$Adventurer_Guild_Activity_Target(Guild, Key, 2),
+				$Adventurer_Guild_Activity_Target(Guild, Key, 3), Done);
+		end
+	return $Adventurer_Guild_Activity_Objectives_Valid(Guild, Kind,
+		$Adventurer_Guild_Activity_Target(Guild, Key, 1),
+		$Adventurer_Guild_Activity_Target(Guild, Key, 2),
+		$Adventurer_Guild_Activity_Target(Guild, Key, 3));
+end
+
+function Adventurer_Guild_Activity_Post(
+	agent Guild, integer Kind, integer Reward, agent First, agent Second, agent Third
+) is boolean
+declare
+	integer Key;
+	list BusyTargets;
+begin
+	if ($Adventurer_Guild_Activities_Ready(Kind) == False)
+		return False;
+	if ((Kind < 9) || (Kind > 16) || (Reward <= 0))
+		return False;
+	if ($Adventurer_Guild_Activity_Objectives_Valid(Guild, Kind, First, Second, Third) == False)
+		return False;
+	if (Kind == 10)
+		begin
+			BusyTargets = $Adventurer_Guild_Support_Busy_Targets(Guild, True);
+			if ($AgentInList(First, BusyTargets))
+				return False;
+		end
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	Key = $Adventurer_Guild_Allocate_Row_Key(Guild);
+	if (Key <= 0)
+		return False;
+	Guild's "AGXKeys" << Key;
+	Guild's "AGXKinds" << Kind;
+	Guild's "AGXRewards" << Reward;
+	$Adventurer_Guild_Activity_Add_Target(Guild, Key, 1, First);
+	$Adventurer_Guild_Activity_Add_Target(Guild, Key, 2, Second);
+	$Adventurer_Guild_Activity_Add_Target(Guild, Key, 3, Third);
+	return True;
+end
+
+function Adventurer_Guild_Activity_Reserved(agent Guild, integer Key, agent Hero) is boolean
+declare
+	agent Applicant;
+	boolean Reserved;
+begin
+	Reserved = False;
+	foreach Applicant in Guild's "AGApplicants" do
+		if ($IsValidGamePiece(Applicant))
+			if (Applicant != Hero)
+				if ($HasAttribute("AGXPendingKey", Applicant))
+					if ((Applicant's "AGPendingGuild" == Guild) &&
+						(Applicant's "AGXPendingKey" == Key))
+						Reserved = True;
+	return Reserved;
+end
+
+function Adventurer_Guild_Activity_Executable(agent Guild, integer Key, agent Hero) is boolean
+declare
+	integer Index, Kind;
+	agent Target;
+begin
+	if ($Adventurer_Guild_Activity_Offer_Valid(Guild, Key) == False)
+		return False;
+	if ($Adventurer_Guild_Activity_Own_Living(Guild, Hero) == False)
+		return False;
+	if ($Adventurer_Guild_Activity_Reserved(Guild, Key, Hero))
+		return False;
+	Index = $Adventurer_Guild_Activity_Index(Guild, Key);
+	Kind = $ListMember(Guild's "AGXKinds", Index);
+	if ($Adventurer_Guild_Activities_Ready(Kind) == False)
+		return False;
+	Target = $Adventurer_Guild_Activity_Target(Guild, Key, 1);
+	if (Kind == 13)
+		return ($Adventurer_Guild_Potion_Sources(Guild, Hero) >= 2);
+	if (Kind == 10)
+		return $Adventurer_Guild_Support_Applicant(Guild, Hero, Target);
+	if (Kind == 15)
+		begin
+			if (($GetAttribute(Target, #ATTRIB_CurrentEvent) <= 0) ||
+				(Target's "Cleaning_Combatants") ||
+				($ListSize(Target's "Combatants") >= #Max_Heroes_In_Tourney) ||
+				($Total_Gold(Hero) < #Tourney_Entrance_Fee))
+				return False;
+		end
+	return True;
+end
+
+function Adventurer_Guild_Activity_Start_Application(agent Guild, integer Key, agent Hero) is boolean
+declare
+begin
+	if ($Adventurer_Guild_Is_Open(Guild) == False)
+		return False;
+	if ($Adventurer_Guild_Activity_Executable(Guild, Key, Hero) == False)
+		return False;
+	$Adventurer_Guild_Activity_Ensure_Hero(Hero);
+	if ($IsValidGamePiece(Hero's "AGAcceptedQuest"))
+		return False;
+	Hero's "AGXPendingKey" = Key;
+	Hero's "AGPendingGuild" = Guild;
+	Hero's "AGPendingQuest" = $NullAgent();
+	Hero's "Target" = Guild;
+	Hero's "TaskName" = "AdventurerGuildClaim";
+	Hero's "ActiveScript" = $Use_Building;
+	if ($AgentInList(Hero, Guild's "AGApplicants") == False)
+		Guild's "AGApplicants" << Hero;
+	$Adventurer_Guild_Intent(Hero, 1);
+	return True;
+end
+
+function Adventurer_Guild_Activity_Claim(agent Guild, agent Hero) is boolean
+declare
+	integer Key, Index, Token;
+	list Empty;
+begin
+	$Adventurer_Guild_Activity_Ensure_Hero(Hero);
+	Key = Hero's "AGXPendingKey";
+	if ((Hero's "AGPendingGuild" != Guild) || (Key <= 0))
+		return False;
+	if ($AgentInList(Hero, Guild's "AGApplicants") == False)
+		return False;
+	if (($Adventurer_Guild_Is_Open(Guild) == False) ||
+		($ListSize(Guild's "AGActiveQuests") >= 4) ||
+		($IsValidGamePiece(Hero's "AGAcceptedQuest")))
+		return False;
+	if ($Adventurer_Guild_Activity_Executable(Guild, Key, Hero) == False)
+		return False;
+
+
+	Token = Hero's "AGXNextClaimToken";
+	if (Token <= 0)
+		return False;
+	if (Token == 2147483647)
+		Hero's "AGXNextClaimToken" = 0;
+	else
+		Hero's "AGXNextClaimToken" += 1;
+	Index = $Adventurer_Guild_Activity_Index(Guild, Key);
+	Hero's "AGQuestKind" = $ListMember(Guild's "AGXKinds", Index);
+	Hero's "AGReward" = $ListMember(Guild's "AGXRewards", Index);
+	Hero's "AGRowKey" = Key;
+	Hero's "AGXClaimToken" = Token;
+	Hero's "AGGuild" = Guild;
+	Hero's "AGClaimant" = Hero;
+	Hero's "AGApplicant" = $NullAgent();
+	Hero's "AGDestination" = $Adventurer_Guild_Activity_Target(Guild, Key, 1);
+	Hero's "AGDestination2" = $Adventurer_Guild_Activity_Target(Guild, Key, 2);
+	Hero's "AGDestination3" = $Adventurer_Guild_Activity_Target(Guild, Key, 3);
+	Hero's "AGStage" = 0;
+	Hero's "AGObjectiveComplete" = False;
+	Hero's "AGPaid" = False;
+	Hero's "AGXPotionKinds" = Empty;
+	Hero's "AGXPestDone" = Empty;
+	Index = 1;
+	while (Index <= $ListSize(Guild's "AGXDoneKeys")) do
+		begin
+			if ($ListMember(Guild's "AGXDoneKeys", Index) == Key)
+				Hero's "AGXPestDone" << $ListMember(Guild's "AGXDoneSlots", Index);
+			Index += 1;
+		end
+	Hero's "AGXJoined" = False;
+	Hero's "AGXDurationStarted" = False;
+	Hero's "AGXDurationCancelled" = False;
+	$Adventurer_Guild_Activity_Set_Text(Hero);
+	Hero's "AGAcceptedQuest" = Hero;
+	Guild's "AGActiveQuests" << Hero;
+	if (Hero's "AGQuestKind" == 11)
+		$Adventurer_Guild_Caravan_Observe(Hero);
+	$Adventurer_Guild_Activity_Remove(Guild, Key);
+	$Adventurer_Guild_Publish_Rows(Guild);
+	return True;
+end
+
+
+
+function Adventurer_Guild_Activity_Matches(agent Hero, agent Guild, integer Key, integer Kind) is boolean
+declare
+begin
+	if (($IsValidGamePiece(Hero) == False) || ($IsValidGamePiece(Guild) == False))
+		return False;
+	if (($IsDead(Hero)) || ($IsDead(Guild)))
+		return False;
+	if ($HasAttribute("AGAcceptedQuest", Hero) == False)
+		return False;
+	if (Hero's "AGAcceptedQuest" != Hero)
+		return False;
+	if ((Hero's "AGGuild" != Guild) || (Hero's "AGClaimant" != Hero) ||
+		(Hero's "AGXClaimToken" != Key) || (Hero's "AGQuestKind" != Kind) ||
+		(Hero's "AGPaid") || (Hero's "AGObjectiveComplete"))
+		return False;
+	return ($UnitsAreSamePlayer(Hero, Guild) && $AgentInList(Hero, Guild's "AGActiveQuests"));
+end
+
+function Adventurer_Guild_Activity_Potion_Consumed(
+	agent Hero, agent Guild, integer Key, string PotionKind
+)
+declare
+	string Existing;
+	boolean Seen;
+begin
+	if ($Adventurer_Guild_Activity_Matches(Hero, Guild, Key, 13) == False)
+		return;
+
+
+	if ((PotionKind != "healing") && (PotionKind != "speed") &&
+		(PotionKind != "strength") && (PotionKind != "shapeshift") &&
+		(PotionKind != "regeneration") && (PotionKind != "invisibility"))
+		return;
+	Seen = False;
+	foreach Existing in Hero's "AGXPotionKinds" do
+		if (Existing == PotionKind)
+			Seen = True;
+	if (Seen)
+		return;
+	Hero's "AGXPotionKinds" << PotionKind;
+	if ($ListSize(Hero's "AGXPotionKinds") >= 2)
+		Hero's "AGObjectiveComplete" = True;
+end
+
+function Adventurer_Guild_Activity_Flag_Completed(
+	agent Hero, agent Guild, integer Key, agent Flag, boolean Credited
+)
+declare
+begin
+	if ($Adventurer_Guild_Activity_Matches(Hero, Guild, Key, 9) == False)
+		return;
+	if ((Flag == Hero's "AGDestination") && (Credited))
+		Hero's "AGObjectiveComplete" = True;
+end
+
+function Adventurer_Guild_Activity_Caravan_Delivered(
+	agent Hero, agent Guild, integer Key, agent Caravan, agent Market
+)
+declare
+begin
+	if ($Adventurer_Guild_Activity_Matches(Hero, Guild, Key, 11) == False)
+		return;
+	if ((Caravan != Hero's "AGDestination") || (Hero's "AGXJoined" == False))
+		return;
+	if ($Adventurer_Guild_Activity_Building(Guild, Market, "Marketplace") == False)
+		return;
+	if ($Adventurer_Guild_Combat_Hero_Nearby(Caravan, Hero))
+		Hero's "AGObjectiveComplete" = True;
+end
+
+function Adventurer_Guild_Activity_Tournament_Completed(
+	agent Hero, agent Guild, integer Key, agent Fairgrounds, boolean Participated
+)
+declare
+begin
+	if ($Adventurer_Guild_Activity_Matches(Hero, Guild, Key, 15) == False)
+		return;
+	if ((Fairgrounds == Hero's "AGDestination") && (Participated))
+		Hero's "AGObjectiveComplete" = True;
+end
+
+function Adventurer_Guild_Activity_Duration_Completed(agent Hero, agent Guild, integer Key)
+declare
+	integer Kind;
+begin
+	if ($IsValidGamePiece(Hero) == False)
+		return;
+	if ($HasAttribute("AGQuestKind", Hero) == False)
+		return;
+	Kind = Hero's "AGQuestKind";
+	if ((Kind != 10) && (Kind != 14))
+		return;
+	if ($Adventurer_Guild_Activity_Matches(Hero, Guild, Key, Kind))
+		if (Hero's "AGXDurationStarted")
+			Hero's "AGObjectiveComplete" = True;
+end
+
+
+
+
+function Adventurer_Guild_Activity_On_Duty(
+	agent Hero, agent Guild, integer Key, boolean StockDuty
+) is boolean
+declare
+	integer Kind, Range;
+	agent Target;
+begin
+	if ($IsValidGamePiece(Hero) == False)
+		return False;
+	if ($HasAttribute("AGQuestKind", Hero) == False)
+		return False;
+	Kind = Hero's "AGQuestKind";
+	if ((Kind != 10) && (Kind != 14))
+		return False;
+	if ($Adventurer_Guild_Activity_Matches(Hero, Guild, Key, Kind) == False)
+		return False;
+	if ((StockDuty == False) || ($InsideBuilding(Hero)) || ($HasLowHP(Hero)))
+		return False;
+	Target = Hero's "AGDestination";
+	if ($Adventurer_Guild_Activity_Objectives_Valid(Guild, Kind, Target,
+		$NullAgent(), $NullAgent()) == False)
+		return False;
+	if ((Kind == 10) && ($InsideBuilding(Target)))
+		return False;
+	Range = $GetAttribute(Target, #ATTRIB_SightRange);
+	return ($DistanceBetweenAgents(Hero, Target) <= Range);
+end
+
+function Adventurer_Guild_Activity_Clear_Hero(agent Hero)
+declare
+	list Empty;
+begin
+	$Adventurer_Guild_Activity_Stop_Services(Hero);
+	if (Hero's "AGQuestKind" == 12)
+		$Adventurer_Guild_Pests_Cancel(Hero);
+	if ((Hero's "BasicScript" == $Adventurer_Guild_Follow_Support) ||
+		(Hero's "BasicScript" == $Adventurer_Guild_Guard_Duty))
+		Hero's "BasicScript" = Hero's "StartingScript";
+	if ($HasAttribute("AGXPotionKinds", Hero))
+		Hero's "AGXPotionKinds" = Empty;
+	if ($HasAttribute("AGXJoined", Hero))
+		Hero's "AGXJoined" = False;
+	if ($HasAttribute("AGDestination3", Hero))
+		Hero's "AGDestination3" = $NullAgent();
+	if ($HasAttribute("AGXDurationStarted", Hero))
+		Hero's "AGXDurationStarted" = False;
+	if ($HasAttribute("AGXClaimToken", Hero))
+		Hero's "AGXClaimToken" = 0;
+	if ($HasAttribute("AGXPestDone", Hero))
+		Hero's "AGXPestDone" = Empty;
+
+
+end
+
+function Adventurer_Guild_Activities_Prune(agent Guild)
+declare
+	list Keys;
+	integer Key;
+	boolean Changed;
+begin
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	$Adventurer_Guild_Activity_Flush_Cancel(Guild);
+	Keys = Guild's "AGXKeys";
+	Changed = False;
+	foreach Key in Keys do
+		if ($Adventurer_Guild_Activity_Offer_Valid(Guild, Key) == False)
+			begin
+				$Adventurer_Guild_Activity_Remove(Guild, Key);
+				Changed = True;
+			end
+	if (Changed)
+		$Adventurer_Guild_Publish_Rows(Guild);
+end
+
+function Adventurer_Guild_Activity_Active_Valid(agent Guild, agent Hero) is boolean
+declare
+begin
+	if ($IsValidGamePiece(Guild) == False)
+		return False;
+	if ($IsDead(Guild))
+		return False;
+	if ($UnitsAreSamePlayer(Guild, Hero) == False)
+		return False;
+	if ((Hero's "AGAcceptedQuest" != Hero) || (Hero's "AGClaimant" != Hero) ||
+		(Hero's "AGGuild" != Guild) || (Hero's "AGPaid"))
+		return False;
+	if (Hero's "AGObjectiveComplete")
+		return True;
+	if (Hero's "AGXDurationCancelled")
+		return False;
+	if (Hero's "AGQuestKind" == 12)
+		return $Adventurer_Guild_Pests_Valid(Guild, Hero's "AGDestination",
+			Hero's "AGDestination2", Hero's "AGDestination3", Hero's "AGXPestDone");
+	return $Adventurer_Guild_Activity_Objectives_Valid(Guild, Hero's "AGQuestKind",
+		Hero's "AGDestination", Hero's "AGDestination2", Hero's "AGDestination3");
+end
+
+function Adventurer_Guild_Activity_Target_In_Use(agent Guild, agent Target) is boolean
+declare
+	agent Hero;
+	boolean Used;
+begin
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	if ($HasAttribute("AGXPestHero", Target))
+		begin
+			Hero = Target's "AGXPestHero";
+			if ($IsValidGamePiece(Hero))
+				if (Hero's "AGAcceptedQuest" == Hero)
+					if ((Hero's "AGQuestKind" == 12) &&
+						(Hero's "AGXClaimToken" == Target's "AGXPestToken"))
+						return True;
+		end
+	if ($AgentInList(Target, Guild's "AGXTargets"))
+		return True;
+	Used = False;
+	foreach Hero in Guild's "AGActiveQuests" do
+		if ($IsValidGamePiece(Hero))
+			if ($HasAttribute("AGDestination3", Hero))
+				if ((Hero's "AGDestination" == Target) ||
+					(Hero's "AGDestination2" == Target) || (Hero's "AGDestination3" == Target))
+					Used = True;
+	return Used;
+end
+
+function Adventurer_Guild_Activity_Create(agent Guild, integer Kind) is boolean
+declare
+	list Objects, Candidates, Markets;
+	agent Target, First, Second, Third, Palace;
+	integer Reward, Pick;
+begin
+	if ($Adventurer_Guild_Activities_Ready(Kind) == False)
+		return False;
+	if (Kind == 10)
+		begin
+			Target = $Adventurer_Guild_Support_Target(Guild);
+			if ($IsValidGamePiece(Target) == False)
+				return False;
+			return $Adventurer_Guild_Activity_Post(Guild, Kind, 600,
+				Target, $NullAgent(), $NullAgent());
+		end
+	if (Kind == 13)
+		begin
+			if ($Adventurer_Guild_Potions_Can_Generate(Guild) == False)
+				return False;
+			return $Adventurer_Guild_Activity_Post(Guild, Kind, 250,
+				$NullAgent(), $NullAgent(), $NullAgent());
+		end
+	if (Kind == 9)
+		$ListObjects(Guild, "rewardFlag", -1, Objects, #RewardFlags, #MyPlayer, #NoHiddenMap);
+	else if (Kind == 11)
+		begin
+			$ListObjects(Guild, "henchman", -1, Objects, #MyPlayer);
+			Objects = $ListTitles(Objects, "Caravan");
+		end
+	else if (Kind == 12)
+		begin
+			Palace = $GetTruePalace(Guild);
+			if ($Adventurer_Guild_Activity_Own_Living(Guild, Palace) == False)
+				return False;
+			$ListObjects(Guild, "monster", -1, Objects, #NotMyTeam);
+			foreach Target in Objects do
+				if ($Adventurer_Guild_Monster_Target_Valid(Guild, Target))
+					if ($Adventurer_Guild_Threat_Rank(Target) <= 4)
+						if ($DistanceBetweenAgents(Palace, Target) <= #AGX_Pest_Radius)
+							if ($Adventurer_Guild_Target_In_Use(Guild, Target) == False)
+								Candidates << Target;
+			if ($ListSize(Candidates) < 3)
+				return False;
+			Pick = $RandomNumber($ListSize(Candidates)) + 1;
+			First = $ListMember(Candidates, Pick);
+			Candidates -= First;
+			Pick = $RandomNumber($ListSize(Candidates)) + 1;
+			Second = $ListMember(Candidates, Pick);
+			Candidates -= Second;
+			Pick = $RandomNumber($ListSize(Candidates)) + 1;
+			Third = $ListMember(Candidates, Pick);
+			Reward = ($Adventurer_Guild_Threat_Rank(First) +
+				$Adventurer_Guild_Threat_Rank(Second) + $Adventurer_Guild_Threat_Rank(Third)) * 50;
+			return $Adventurer_Guild_Activity_Post(Guild, Kind, Reward, First, Second, Third);
+		end
+	else
+		begin
+			$ListObjects(Guild, "building", -1, Objects, #MyPlayer);
+			Objects = $ListCompleted(Objects);
+		end
+	if (Kind == 16)
+		begin
+
+
+			Markets = $ListTitles(Objects, "Marketplace");
+			if ($ListSize(Markets) == 0)
+				return False;
+			Second = $ListMember(Markets, 1);
+			Objects = $ListTitles(Objects, "Trading_Post");
+		end
+	foreach Target in Objects do
+		if ($Adventurer_Guild_Target_In_Use(Guild, Target) == False)
+			if ($Adventurer_Guild_Activity_Objectives_Valid(Guild, Kind, Target, Second, $NullAgent()))
+				begin
+					if (Kind == 16)
+						begin
+							if ($DistanceBetweenAgents(Target, Second) >= #AGX_Trade_Min_Distance)
+								Candidates << Target;
+						end
+					else if (Kind == 15)
+						begin
+							if (($GetAttribute(Target, #ATTRIB_CurrentEvent) > 0) &&
+								(Target's "Cleaning_Combatants" == False) &&
+								($ListSize(Target's "Combatants") < #Max_Heroes_In_Tourney))
+								Candidates << Target;
+						end
+					else
+						Candidates << Target;
+				end
+	if ($ListSize(Candidates) == 0)
+		return False;
+	Pick = $RandomNumber($ListSize(Candidates)) + 1;
+	First = $ListMember(Candidates, Pick);
+	Reward = 300;
+	if (Kind == 9)
+		Reward = 150;
+	else if (Kind == 14)
+		Reward = 400;
+	else if (Kind == 15)
+		Reward = 200;
+	return $Adventurer_Guild_Activity_Post(Guild, Kind, Reward, First, Second, $NullAgent());
+end
+
+function Adventurer_Guild_Activity_Best_Key(agent Guild, agent Hero) is integer
+declare
+	integer Index, Key, Reward, BestKey, BestReward;
+begin
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	Index = 1;
+	BestKey = 0;
+	BestReward = 0;
+	while (Index <= $ListSize(Guild's "AGXKeys")) do
+		begin
+			Key = $ListMember(Guild's "AGXKeys", Index);
+			Reward = $ListMember(Guild's "AGXRewards", Index);
+			if (Reward > BestReward)
+				if ($Adventurer_Guild_Activity_Executable(Guild, Key, Hero))
+					begin
+						BestKey = Key;
+						BestReward = Reward;
+					end
+			Index += 1;
+		end
+	return BestKey;
+end
+
+function Adventurer_Guild_Activity_Trade_Arrived(agent Hero)
+declare
+	agent Target;
+begin
+	if ($Adventurer_Guild_Activity_Active_Valid(Hero's "AGGuild", Hero) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Hero);
+			$Reset_Tasks(Hero);
+			return;
+		end
+	Target = Hero's "AGDestination";
+	if (Hero's "AGStage" == 1)
+		Target = Hero's "AGDestination2";
+	if ($IsAdjacent(Hero, Target))
+		begin
+			Hero's "AGStage" += 1;
+			if (Hero's "AGStage" == 2)
+				begin
+					Hero's "AGObjectiveComplete" = True;
+					$Adventurer_Guild_Assign_Return(Hero, Hero);
+					return;
+				end
+		end
+	$Adventurer_Guild_Activity_Assign(Hero);
+end
+
+function Adventurer_Guild_Activity_Assign(agent Hero) is boolean
+declare
+	agent Target;
+	integer Kind, Result;
+begin
+	Kind = Hero's "AGQuestKind";
+	if (Hero's "AGObjectiveComplete")
+		return $Adventurer_Guild_Assign_Return(Hero, Hero);
+	if ($Adventurer_Guild_Activity_Active_Valid(Hero's "AGGuild", Hero) == False)
+		return False;
+	if (Kind == 13)
+		return True;
+	Target = Hero's "AGDestination";
+	if (Kind == 16)
+		begin
+			if (Hero's "AGStage" == 1)
+				Target = Hero's "AGDestination2";
+			Hero's "Target" = Hero;
+			Hero's "Destination" = $LocationOf(Target);
+			Hero's "TaskName" = "AdventurerGuildDispatch";
+			Hero's "ActiveScript" = $Travel_To;
+			Hero's "BackScript" = $Adventurer_Guild_Activity_Trade_Arrived;
+			$Adventurer_Guild_Intent(Hero, 2);
+			$Move(Hero, Hero's "Destination");
+			return True;
+		end
+	if (Kind == 15)
+		begin
+			if (($GetAttribute(Target, #ATTRIB_CurrentEvent) <= 0) ||
+				(Target's "Cleaning_Combatants") || ($Total_Gold(Hero) < #Tourney_Entrance_Fee))
+				return False;
+			if ($AgentInList(Hero, Target's "Combatants") == False)
+				begin
+					if ($ListSize(Target's "Combatants") >= #Max_Heroes_In_Tourney)
+						return False;
+					Target's "Combatants" << Hero;
+				end
+			Hero's "Target" = Target;
+			Hero's "TaskName" = "visiting";
+			Hero's "ActiveScript" = $Use_Building;
+			$Adventurer_Guild_Intent(Hero, 2);
+			return True;
+		end
+	if (Kind == 9)
+		begin
+
+
+			if (Target's "title" == "flag_explore")
+				begin
+					$SpecifyIntent(Hero, #Intent_Going_To_Explore_Flag);
+					Hero's "ActiveScript" = $Travel_To;
+					Hero's "BackScript" = Hero's "BasicScript";
+					Hero's "Target" = Hero;
+					Hero's "Destination" = $LocationOf(Target);
+					$Move(Hero, Hero's "Destination");
+				end
+			else
+				begin
+					$SpecifyIntent(Hero, #Intent_Going_To_Attack_Flag);
+					Hero's "Target" = $AgentNumber($GetAttribute(Target, #ATTRIB_TargetID));
+					Hero's "ActiveScript" = $Attack_Object;
+				end
+			if ($AgentInList(Hero, Target's "heroes") == False)
+				Target's "heroes" << Hero;
+			$SetParent(Hero, Target);
+			$Say(Hero, "VFX_GO_REWARD");
+			$Adventurer_Guild_Intent(Hero, 2);
+			return True;
+		end
+	if (Kind == 12)
+		return $Adventurer_Guild_Pests_Assign(Hero);
+	if ((Kind == 10) || (Kind == 11) || (Kind == 14))
+		begin
+			if ((Kind == 10) || (Kind == 14))
+				begin
+					Result = $Adventurer_Guild_Activity_Start_Duration(Hero, #AGX_Duty_Days);
+					if ((Result == -3) || (Result == -2))
+						return True;
+					if (Result != 1)
+						return False;
+				end
+			if ($HasLowHP(Hero))
+				return False;
+			Hero's "BackTarget" = Target;
+			Hero's "Target" = Target;
+			Hero's "Counter" = 0;
+			if (Kind == 14)
+				begin
+					Hero's "BasicScript" = $Adventurer_Guild_Guard_Duty;
+					Hero's "ActiveScript" = $Adventurer_Guild_Guard_Duty;
+					Hero's "BackScript" = $Adventurer_Guild_Guard_Duty;
+				end
+			else
+				begin
+					Hero's "BasicScript" = $Adventurer_Guild_Follow_Support;
+					Hero's "ActiveScript" = $Adventurer_Guild_Follow_Support;
+					Hero's "BackScript" = $Adventurer_Guild_Follow_Support;
+				end
+			$Adventurer_Guild_Intent(Hero, 2);
+			return True;
+		end
+	return False;
+end
+
+function Adventurer_Guild_Activity_Resume(agent Hero) is boolean
+declare
+	integer Result;
+begin
+	if (Hero's "AGObjectiveComplete")
+		return $Adventurer_Guild_Assign_Return(Hero, Hero);
+	if ($Adventurer_Guild_Activity_Active_Valid(Hero's "AGGuild", Hero) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Hero);
+			return False;
+		end
+	if (Hero's "AGQuestKind" == 13)
+		return False;
+	if ((Hero's "AGQuestKind" == 10) || (Hero's "AGQuestKind" == 11) ||
+		(Hero's "AGQuestKind" == 14))
+		if ($HasLowHP(Hero))
+			return False;
+	if ((Hero's "AGQuestKind" == 10) || (Hero's "AGQuestKind" == 14))
+		begin
+			Result = $Adventurer_Guild_Activity_Start_Duration(Hero, #AGX_Duty_Days);
+			if ((Result == -3) || (Result == -2))
+				return False;
+			if (Result != 1)
+				begin
+					$Adventurer_Guild_Fail_Quest(Hero);
+					return False;
+				end
+		end
+	if ($Adventurer_Guild_Activity_Assign(Hero))
+		return True;
+	$Adventurer_Guild_Fail_Quest(Hero);
+	return False;
+end
+
+function Adventurer_Guild_Activity_Repost(agent Hero) is boolean
+declare
+	agent Guild, First, Second, Third;
+	integer Key, Kind, Reward;
+	integer Slot;
+	list Done, BusyTargets;
+begin
+	Guild = Hero's "AGGuild";
+	Kind = Hero's "AGQuestKind";
+	First = Hero's "AGDestination";
+	Second = Hero's "AGDestination2";
+	Third = Hero's "AGDestination3";
+	Done = Hero's "AGXPestDone";
+	if (Kind == 12)
+		begin
+			if ($Adventurer_Guild_Pests_Valid(Guild, First, Second, Third, Done) == False)
+				return False;
+		end
+	else
+		if ($Adventurer_Guild_Activity_Objectives_Valid(Guild, Kind, First, Second, Third) == False)
+			return False;
+	Key = Hero's "AGRowKey";
+	Reward = Hero's "AGReward";
+	$Adventurer_Guild_Fail_Quest(Hero);
+	if (Kind == 10)
+		begin
+			BusyTargets = $Adventurer_Guild_Support_Busy_Targets(Guild, True);
+			if ($AgentInList(First, BusyTargets))
+				return False;
+		end
+	$Adventurer_Guild_Activities_Ensure(Guild);
+	Guild's "AGXKeys" << Key;
+	Guild's "AGXKinds" << Kind;
+	Guild's "AGXRewards" << Reward;
+	$Adventurer_Guild_Activity_Add_Target(Guild, Key, 1, First);
+	$Adventurer_Guild_Activity_Add_Target(Guild, Key, 2, Second);
+	$Adventurer_Guild_Activity_Add_Target(Guild, Key, 3, Third);
+	if (Kind == 12)
+		foreach Slot in Done do
+			begin
+				Guild's "AGXDoneKeys" << Key;
+				Guild's "AGXDoneSlots" << Slot;
+			end
+	$Adventurer_Guild_Publish_Rows(Guild);
+	return True;
+end
+
+function Adventurer_Guild_Activity_Start_Duration(agent Hero, integer Days) is integer
+declare
+	integer Result;
+begin
+	if (Hero's "AGXDurationStarted")
+		return 1;
+	Result = $Adventurer_Guild_Duty_Start(Hero, Hero's "AGDestination",
+		Hero's "AGGuild", Hero's "AGXClaimToken", Days * 60000);
+	if ((Result == 1) || (Result == 0))
+		begin
+			Hero's "AGXDurationStarted" = True;
+			return 1;
+		end
+	return Result;
+end
+
+function Adventurer_Guild_Activity_Stop_Services(agent Hero)
+declare
+	agent Guild, Target;
+	integer Result;
+begin
+	Guild = Hero's "AGGuild";
+	Target = Hero's "AGDestination";
+	if (Hero's "AGQuestKind" == 11)
+		if ($IsValidGamePiece(Target))
+			if ($HasAttribute("AGXEscorts", Target))
+				Target's "AGXEscorts" -= Hero;
+	if ((Hero's "AGQuestKind" == 10) || (Hero's "AGQuestKind" == 14))
+		begin
+			Result = $Adventurer_Guild_Duty_Cancel(Hero, Hero's "AGXClaimToken");
+			if (Result == -3)
+				if ($IsValidGamePiece(Guild))
+					if ($IsDead(Guild) == False)
+						begin
+							Guild's "AGXCancelHeroes" << Hero;
+							Guild's "AGXCancelTokens" << Hero's "AGXClaimToken";
+						end
+		end
+end
+
+function Adventurer_Guild_Activity_Flush_Cancel(agent Guild)
+declare
+	list Heroes, Tokens;
+	agent Hero;
+	integer Index, Token, Result;
+begin
+	Index = 1;
+	while (Index <= $ListSize(Guild's "AGXCancelTokens")) do
+		begin
+			Hero = $ListMember(Guild's "AGXCancelHeroes", Index);
+			Token = $ListMember(Guild's "AGXCancelTokens", Index);
+			Result = $Adventurer_Guild_Duty_Cancel(Hero, Token);
+			if (Result == -3)
+				begin
+					Heroes << Hero;
+					Tokens << Token;
+				end
+			Index += 1;
+		end
+	Guild's "AGXCancelHeroes" = Heroes;
+	Guild's "AGXCancelTokens" = Tokens;
+end
+
+
+
+function Adventurer_Guild_Duty_Qualifies(agent Owner, agent Subject, agent Context, integer Key) is boolean
+declare
+	boolean DoingDuty;
+begin
+	if ($HasAttribute("AGDestination", Owner) == False)
+		return False;
+	if (Owner's "AGDestination" != Subject)
+		return False;
+	DoingDuty = ((Owner's "ActiveScript" == $Adventurer_Guild_Follow_Support) ||
+		(Owner's "ActiveScript" == $Adventurer_Guild_Guard_Duty) ||
+		(Owner's "ActiveScript" == $Adventurer_Guild_Guard_Wander) ||
+		(Owner's "ActiveScript" == $Attack_Object));
+	if (Owner's "ActiveScript" == $Travel_To)
+		DoingDuty = ((Owner's "BackScript" == $Adventurer_Guild_Follow_Support) ||
+			(Owner's "BackScript" == $Adventurer_Guild_Guard_Duty));
+	return $Adventurer_Guild_Activity_On_Duty(Owner, Context, Key, DoingDuty);
+end
+
+function Adventurer_Guild_Duty_Completed(agent Owner, agent Subject, agent Context, integer Key)
+declare
+begin
+	$Adventurer_Guild_Activity_Duration_Completed(Owner, Context, Key);
+end
+
+function Adventurer_Guild_Duty_Cancelled(agent Owner, agent Subject, agent Context, integer Key, integer Reason)
+declare
+begin
+
+
+
+	if ((Reason == 1) || (Reason == 2))
+		return;
+
+
+	if ($IsValidGamePiece(Owner) == False)
+		return;
+	if ($HasAttribute("AGXClaimToken", Owner) == False)
+		return;
+	if ((Owner's "AGXClaimToken" == Key) && (Owner's "AGGuild" == Context))
+		Owner's "AGXDurationCancelled" = True;
+end
+
+
+
+function Adventurer_Guild_Event_Potion(agent Consumer, string PotionIdentity)
+declare
+	string Kind;
+begin
+	if ($HasAttribute("AGXClaimToken", Consumer) == False)
+		return;
+	Kind = "";
+	if (PotionIdentity == "healing_potion")
+		Kind = "healing";
+	else if (PotionIdentity == "speed_tonic")
+		Kind = "speed";
+	else if (PotionIdentity == "strength_potion")
+		Kind = "strength";
+	else if (PotionIdentity == "shapeshift_potion")
+		Kind = "shapeshift";
+	else if (PotionIdentity == "regeneration_elixer")
+		Kind = "regeneration";
+	else if (PotionIdentity == "invisibility_brew")
+		Kind = "invisibility";
+	$Adventurer_Guild_Activity_Potion_Consumed(Consumer, Consumer's "AGGuild",
+		Consumer's "AGXClaimToken", Kind);
+end
+
+function Adventurer_Guild_Event_Flag(agent Flag, agent Recipient, integer Share)
+declare
+begin
+	if ($HasAttribute("AGXClaimToken", Recipient) == False)
+		return;
+	$Adventurer_Guild_Activity_Flag_Completed(Recipient, Recipient's "AGGuild",
+		Recipient's "AGXClaimToken", Flag, True);
+end
+
+function Adventurer_Guild_Caravan_Observe(agent Hero)
+declare
+	agent Caravan;
+begin
+	Caravan = Hero's "AGDestination";
+	if ($HasAttribute("AGXEscorts", Caravan) == False)
+		$AddAttribute(Caravan, "AGXEscorts", "list");
+	if ($AgentInList(Hero, Caravan's "AGXEscorts") == False)
+		Caravan's "AGXEscorts" << Hero;
+end
+
+function Adventurer_Guild_Event_Caravan(agent Caravan, agent Destination, integer Cargo)
+declare
+	list Escorts;
+	agent Hero;
+begin
+	if ($HasAttribute("AGXEscorts", Caravan) == False)
+		return;
+	Escorts = Caravan's "AGXEscorts";
+	foreach Hero in Escorts do
+		if ($IsValidGamePiece(Hero))
+			$Adventurer_Guild_Activity_Caravan_Delivered(Hero, Hero's "AGGuild",
+				Hero's "AGXClaimToken", Caravan, Destination);
+end
+
+function Adventurer_Guild_Event_Tournament(agent Participant, agent Fairgrounds,
+	integer Event, integer Rank, integer Participants)
+declare
+begin
+	if ($HasAttribute("AGXClaimToken", Participant) == False)
+		return;
+	$Adventurer_Guild_Activity_Tournament_Completed(Participant, Participant's "AGGuild",
+		Participant's "AGXClaimToken", Fairgrounds, True);
+end
+
+function Adventurer_Guild_Activity_Duty_Continue(agent Hero) is boolean
+declare
+begin
+	if ($HasAttribute("AGAcceptedQuest", Hero) == False)
+		return False;
+	if (Hero's "AGAcceptedQuest" != Hero)
+		begin
+			Hero's "BasicScript" = Hero's "StartingScript";
+			$Reset_Tasks(Hero);
+			return False;
+		end
+	if ($Adventurer_Guild_Activity_Active_Valid(Hero's "AGGuild", Hero) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Hero);
+			$Reset_Tasks(Hero);
+			return False;
+		end
+	if (Hero's "AGObjectiveComplete")
+		begin
+			Hero's "BasicScript" = Hero's "StartingScript";
+			$Adventurer_Guild_Assign_Return(Hero, Hero);
+			return False;
+		end
+	return True;
+end
+
+
+
+
+
+
+function Adventurer_Guild_Follow_Support(agent ThisAgent)
+declare
+	agent Leader, Anchor, Enemy;
+	integer Range;
+begin
+	if ($Adventurer_Guild_Activity_Duty_Continue(ThisAgent) == False)
+		return;
+	Leader = ThisAgent's "BackTarget";
+	if ($HasLowHP(ThisAgent))
+		begin
+			ThisAgent's "BasicScript" = ThisAgent's "StartingScript";
+			$Reset_Tasks(ThisAgent);
+			return;
+		end
+	Anchor = Leader;
+	$Adventurer_Guild_Intent(ThisAgent, 2);
+	if ($IsHidden(Leader))
+		begin
+			Anchor = $GetBuildingContainer(Leader);
+			if ($IsValidGamePiece(Anchor) == False)
+				begin
+					$StopMoving(ThisAgent);
+					ThisAgent's "Target" = $NullAgent();
+					return;
+				end
+		end
+	if (ThisAgent's "AGQuestKind" == 11)
+		if ($Adventurer_Guild_Combat_Hero_Nearby(Leader, ThisAgent))
+			ThisAgent's "AGXJoined" = True;
+
+
+	if ($Has_Attrib_Target_and_Is_Valid(Leader))
+		if ($GetPlayerTeamNumber(Leader's "Target") == $GetPlayerTeamNumber(ThisAgent))
+			begin
+				ThisAgent's "Target" = $NullAgent();
+				$Adventurer_Guild_Wander_Near_Leader(ThisAgent, Anchor);
+				return;
+			end
+	if ($Has_Attrib_Target_and_Is_Valid(Anchor))
+		begin
+			Enemy = Anchor's "Target";
+			if ($GetPlayerTeamNumber(Enemy) == $GetPlayerTeamNumber(ThisAgent))
+				begin
+					ThisAgent's "Target" = $NullAgent();
+					$Adventurer_Guild_Wander_Near_Leader(ThisAgent, Anchor);
+					return;
+				end
+			Range = $GetAttribute(ThisAgent, #ATTRIB_SightRange) * #Mon_Atck_Obj_Pursuit_Range_Mod;
+			if ($DistanceBetweenAgents(ThisAgent, Enemy) < Range)
+				begin
+					ThisAgent's "ActiveScript" = $Attack_Object;
+					ThisAgent's "Target" = Enemy;
+				end
+			else
+				begin
+
+
+
+					ThisAgent's "Target" = ThisAgent;
+					ThisAgent's "Destination" = $LocationOf(Leader);
+					ThisAgent's "ActiveScript" = $Travel_To;
+					ThisAgent's "BackScript" = $Adventurer_Guild_Follow_Support;
+					$Move(ThisAgent, ThisAgent's "Destination", "avoid_vehicles");
+				end
+		end
+	else
+		$Adventurer_Guild_Wander_Near_Leader(ThisAgent, Anchor);
+end
+
+
+
+function Adventurer_Guild_Wander_Near_Leader(agent Hero, agent Leader)
+declare
+begin
+	if ($IsMoving(Hero) == False)
+		$Move(Hero, $RandomCoord(Leader, 300));
+	else
+		(Hero's "EvaluationScript")(Hero);
+end
+
+
+
+function Adventurer_Guild_Guard_Duty(agent Hero)
+declare
+	agent Building;
+	integer Range;
+	list Enemies;
+begin
+	if ($Adventurer_Guild_Activity_Duty_Continue(Hero) == False)
+		return;
+	if ($HasLowHP(Hero))
+		begin
+			Hero's "BasicScript" = Hero's "StartingScript";
+			$Reset_Tasks(Hero);
+			return;
+		end
+	Building = Hero's "AGDestination";
+	$Adventurer_Guild_Intent(Hero, 2);
+	Range = $GetAttribute(Building, #ATTRIB_SightRange);
+	if ($DistanceBetweenAgents(Hero, Building) > Range)
+		begin
+			Hero's "Target" = Hero;
+			Hero's "Destination" = $LocationOf(Building);
+			Hero's "ActiveScript" = $Travel_To;
+			Hero's "BackScript" = $Adventurer_Guild_Guard_Duty;
+			$Move(Hero, Hero's "Destination");
+			return;
+		end
+	Enemies = $List_Enemies_Seen(Building, Range);
+	if ($ListSize(Enemies) > 0)
+		begin
+			Hero's "Target" = $ListMember(Enemies, 1);
+			Hero's "ActiveScript" = $Attack_Object;
+		end
+	else
+		begin
+			Hero's "Counter" = 0;
+			Hero's "ActiveScript" = $Adventurer_Guild_Guard_Wander;
+		end
+end
+
+
+
+function Adventurer_Guild_Guard_Wander(agent Hero)
+declare
+	agent Building;
+begin
+	if ($Adventurer_Guild_Activity_Duty_Continue(Hero) == False)
+		return;
+	if ($HasLowHP(Hero))
+		begin
+			Hero's "BasicScript" = Hero's "StartingScript";
+			$Reset_Tasks(Hero);
+			return;
+		end
+	$Adventurer_Guild_Intent(Hero, 2);
+	if (Hero's "Counter" <= #Guard_Wander_Number)
+		begin
+			if ($IsMoving(Hero) == False)
+				begin
+					if ($RandomNumber(100) > 80)
+						$PerformAction(Hero, Hero's "Idle_Action", $LocationOf(Hero));
+					else
+						begin
+							Building = Hero's "AGDestination";
+							$Move(Hero, $RandomCoord(Building, $GetAttribute(Building, #ATTRIB_SightRange)));
+							Hero's "Counter" ++;
+						end
+				end
+			else
+				begin
+					$Adventurer_Guild_Guard_Eval_While_Wandering(Hero);
+				end
+		end
+	else
+		begin
+			Hero's "ActiveScript" = $Adventurer_Guild_Guard_Duty;
+		end
+end
+
+
+
+function Adventurer_Guild_Guard_Eval_While_Wandering(agent Hero)
+declare
+	list InSight;
+	agent NewTarget, Building;
+	integer HomeTargetRange;
+begin
+	$Cleanse_Hostiles(Hero);
+	InSight = $List_Enemies_Seen(Hero, $GetAttribute(Hero, #ATTRIB_SightRange));
+	InSight = $AddLists(Hero's "Hostiles", InSight);
+	if ($ListSize(InSight) > 0)
+		begin
+			NewTarget = $pick_closest(Hero, InSight);
+			Building = Hero's "AGDestination";
+			if ($NotValid(NewTarget) == False)
+				if (NewTarget != Hero's "Target")
+					begin
+						HomeTargetRange = $DistanceBetweenAgents(Building, NewTarget);
+						if (HomeTargetRange <= ($GetAttribute(Building, #ATTRIB_SightRange) +
+							$GetAttribute(Hero, #ATTRIB_SightRange)))
+							begin
+								Hero's "Target" = NewTarget;
+								Hero's "ActiveScript" = $Attack_Object;
+							end
+						else
+							begin
+								Hero's "Target" = $NullAgent();
+								$Move(Hero, Building);
+							end
+					end
+		end
+	$ClearList(Hero's "Hostiles");
+end
+
+function Adventurer_Guild_Pest_Done(list Done, integer Slot) is boolean
+declare
+	integer Value;
+	boolean Found;
+begin
+	Found = False;
+	foreach Value in Done do
+		if (Value == Slot)
+			Found = True;
+	return Found;
+end
+
+function Adventurer_Guild_Pests_Valid(agent Guild, agent First, agent Second, agent Third, list Done) is boolean
+declare
+begin
+	if ($Adventurer_Guild_Pest_Done(Done, 1) == False)
+		if ($Adventurer_Guild_Pest_Target_Valid(Guild, First) == False)
+			return False;
+	if ($Adventurer_Guild_Pest_Done(Done, 2) == False)
+		if ($Adventurer_Guild_Pest_Target_Valid(Guild, Second) == False)
+			return False;
+	if ($Adventurer_Guild_Pest_Done(Done, 3) == False)
+		if ($Adventurer_Guild_Pest_Target_Valid(Guild, Third) == False)
+			return False;
+	return True;
+end
+
+function Adventurer_Guild_Pest_Target_Valid(agent Guild, agent Target) is boolean
+declare
+	agent Other;
+begin
+	if ($Adventurer_Guild_Monster_Target_Valid(Guild, Target) == False)
+		return False;
+
+
+
+	if ($HasAttribute("AGXPestHero", Target))
+		begin
+			Other = Target's "AGXPestHero";
+			if ($IsValidGamePiece(Other))
+				if (Other's "AGAcceptedQuest" == Other)
+					if ((Other's "AGQuestKind" == 12) &&
+						(Other's "AGXClaimToken" == Target's "AGXPestToken") &&
+						(Other's "AGGuild" != Guild))
+						return False;
+		end
+	return True;
+end
+
+function Adventurer_Guild_Pest_Target(agent Hero, integer Slot) is agent
+declare
+begin
+	if (Slot == 1)
+		return Hero's "AGDestination";
+	if (Slot == 2)
+		return Hero's "AGDestination2";
+	return Hero's "AGDestination3";
+end
+
+function Adventurer_Guild_Pests_Assign(agent Hero) is boolean
+declare
+	integer Slot;
+	agent Target, Next;
+begin
+	Slot = 1;
+	while (Slot <= 3) do
+		begin
+			if ($Adventurer_Guild_Pest_Done(Hero's "AGXPestDone", Slot) == False)
+				begin
+					Target = $Adventurer_Guild_Pest_Target(Hero, Slot);
+					if ($Adventurer_Guild_Monster_Target_Valid(Hero's "AGGuild", Target) == False)
+						return False;
+					if ($HasAttribute("AGXPestHero", Target) == False)
+						$AddAttribute(Target, "AGXPestHero", "agentref");
+					if ($HasAttribute("AGXPestToken", Target) == False)
+						$AddAttribute(Target, "AGXPestToken", "integer", 0);
+					if ($HasAttribute("AGXPestSlot", Target) == False)
+						$AddAttribute(Target, "AGXPestSlot", "integer", 0);
+					if ((Target's "AGXPestToken" != Hero's "AGXClaimToken") ||
+						(Target's "AGXPestHero" != Hero))
+						begin
+							Target's "AGXPestHero" = Hero;
+							Target's "AGXPestToken" = Hero's "AGXClaimToken";
+							Target's "AGXPestSlot" = Slot;
+							$CreateEffector(Target, "Adventurer_Guild_Lair_Tracker", 1, "infinite");
+						end
+					if ($IsValidGamePiece(Next) == False)
+						Next = Target;
+				end
+			Slot += 1;
+		end
+	if ($IsValidGamePiece(Next) == False)
+		return False;
+	Hero's "Target" = Next;
+	Hero's "TaskName" = "AdventurerGuildDispatch";
+	Hero's "ActiveScript" = $Attack_Object;
+	$Adventurer_Guild_Intent(Hero, 2);
+	return True;
+end
+
+function Adventurer_Guild_Pest_Defeated(agent Target)
+declare
+	agent Hero, Guild;
+	integer Slot;
+begin
+	if ($HasAttribute("AGXPestHero", Target) == False)
+		return;
+	Hero = Target's "AGXPestHero";
+	if ($IsValidGamePiece(Hero) == False)
+		return;
+	Guild = Hero's "AGGuild";
+	if ($Adventurer_Guild_Activity_Matches(Hero, Guild, Target's "AGXPestToken", 12) == False)
+		return;
+	Slot = Target's "AGXPestSlot";
+	if ($Adventurer_Guild_Pest_Target(Hero, Slot) != Target)
+		return;
+	if ($Adventurer_Guild_Pest_Done(Hero's "AGXPestDone", Slot))
+		return;
+	if (($IsDead(Target) == False) &&
+		($Adventurer_Guild_Monster_Was_Zoo_Captured(Guild, Target) == False))
+		return;
+	if ($Adventurer_Guild_Combat_Hero_Nearby(Target, Hero) == False)
+		begin
+			$Adventurer_Guild_Fail_Quest(Hero);
+			return;
+		end
+	Hero's "AGXPestDone" << Slot;
+	if ($ListSize(Hero's "AGXPestDone") == 3)
+		Hero's "AGObjectiveComplete" = True;
+end
+
+function Adventurer_Guild_Pests_Update(agent Hero)
+declare
+	integer Slot;
+	agent Target;
+begin
+	Slot = 1;
+	while (Slot <= 3) do
+		begin
+			if (Hero's "AGAcceptedQuest" != Hero)
+				return;
+			if ($Adventurer_Guild_Pest_Done(Hero's "AGXPestDone", Slot) == False)
+				begin
+					Target = $Adventurer_Guild_Pest_Target(Hero, Slot);
+					if ($IsValidGamePiece(Target))
+						if ($Adventurer_Guild_Monster_Was_Zoo_Captured(Hero's "AGGuild", Target))
+							$Adventurer_Guild_Pest_Defeated(Target);
+				end
+			Slot += 1;
+		end
+end
+
+function Adventurer_Guild_Activity_Set_Text(agent Hero)
+declare
+	integer Kind;
+begin
+	Kind = Hero's "AGQuestKind";
+	if (Kind == 9)
+		begin
+			Hero's "AGName" = "Answer the Call";
+			Hero's "AGGoal" = "Complete a posted reward flag";
+		end
+	else if (Kind == 10)
+		begin
+			Hero's "AGName" = "Watch My Back";
+			Hero's "AGGoal" = "Support a hero for one day";
+		end
+	else if (Kind == 11)
+		begin
+			Hero's "AGName" = "Caravan Guard";
+			Hero's "AGGoal" = "Escort a caravan to market";
+		end
+	else if (Kind == 12)
+		begin
+			Hero's "AGName" = "Pest Control";
+			Hero's "AGGoal" = "Defeat three nearby pests";
+		end
+	else if (Kind == 13)
+		begin
+			Hero's "AGName" = "Field Testing";
+			Hero's "AGGoal" = "Use two different potions";
+		end
+	else if (Kind == 14)
+		begin
+			Hero's "AGName" = "Hold the Line";
+			Hero's "AGGoal" = "Guard for one day on duty";
+		end
+	else if (Kind == 15)
+		begin
+			Hero's "AGName" = "Tournament Trial";
+			Hero's "AGGoal" = "Finish a tournament";
+		end
+	else if (Kind == 16)
+		begin
+			Hero's "AGName" = "Trade Route Survey";
+			Hero's "AGGoal" = "Visit a post and its market";
+		end
+end
+
+
+
+
+function Adventurer_Guild_Potion_Sources(agent Guild, agent Hero) is integer
+declare
+	list Buildings, Bazaars;
+begin
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+	Bazaars = $ListTitles(Buildings, "Magic_Bazaar");
+	return $Adventurer_Guild_Potion_Source_Count(Hero, Bazaars);
+end
+
+function Adventurer_Guild_Potion_Source_Count(agent Hero, list Bazaars) is integer
+declare
+	list Researched;
+	integer Count;
+begin
+	Count = 0;
+	if ($GetAttribute(Hero, #ATTRIB_NumHealingPotions) > 0)
+		Count += 1;
+	Researched = $Researched_Item(Bazaars, #Bazaar_Item_One);
+	if (($AgentHasInventoryItem(#Bazaar_Item_One, Hero)) || ($ListSize(Researched) > 0))
+		Count += 1;
+	Researched = $Researched_Item(Bazaars, #Bazaar_Item_Three);
+	if (($AgentHasInventoryItem(#Bazaar_Item_Three, Hero)) || ($ListSize(Researched) > 0))
+		Count += 1;
+	Researched = $Researched_Item(Bazaars, #Bazaar_Item_Six);
+	if ($AgentHasInventoryItem(#Bazaar_Item_Six, Hero))
+		Count += 1;
+	else
+		if ((Hero's "title" != "cultist") && ($ListSize(Researched) > 0))
+			Count += 1;
+	Researched = $Researched_Item(Bazaars, #Bazaar_Item_Four);
+	if (($AgentHasInventoryItem(#Bazaar_Item_Four, Hero)) || ($ListSize(Researched) > 0))
+		Count += 1;
+	Researched = $Researched_Item(Bazaars, #Bazaar_Item_Five);
+	if (($AgentHasInventoryItem(#Bazaar_Item_Five, Hero)) || ($ListSize(Researched) > 0))
+		Count += 1;
+	return Count;
+end
+
+function Adventurer_Guild_Potions_Can_Generate(agent Guild) is boolean
+declare
+	list Heroes, Buildings, Bazaars;
+	agent Hero;
+	boolean Feasible;
+begin
+	$ListObjects(Guild, "hero", -1, Heroes, #MyPlayer);
+	$ListObjects(Guild, "building", -1, Buildings, #MyPlayer);
+	Buildings = $ListCompleted(Buildings);
+	Bazaars = $ListTitles(Buildings, "Magic_Bazaar");
+	Feasible = False;
+	foreach Hero in Heroes do
+		if (Feasible == False)
+			if ($IsDead(Hero) == False)
+				if ($Adventurer_Guild_Potion_Source_Count(Hero, Bazaars) >= 2)
+					Feasible = True;
+	return Feasible;
+end
+
+function Adventurer_Guild_Pests_Cancel(agent Hero)
+declare
+	integer Slot;
+	agent Target;
+begin
+	Slot = 1;
+	while (Slot <= 3) do
+		begin
+			Target = $Adventurer_Guild_Pest_Target(Hero, Slot);
+			if ($IsValidGamePiece(Target))
+				if ($HasAttribute("AGXPestHero", Target))
+					if ((Target's "AGXPestHero" == Hero) &&
+						(Target's "AGXPestToken" == Hero's "AGXClaimToken"))
+						begin
+							Target's "AGXPestHero" = $NullAgent();
+							Target's "AGXPestToken" = 0;
+							if ($IsDead(Target) == False)
+								$DeleteEffector(Target, "Adventurer_Guild_Lair_Tracker");
+						end
+			Slot += 1;
+		end
+end

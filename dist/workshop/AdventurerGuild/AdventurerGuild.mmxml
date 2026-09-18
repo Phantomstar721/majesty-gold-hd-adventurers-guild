@@ -1,0 +1,28 @@
+<Majesty>
+	<Mod id="{f851817e-de04-4f5d-bb40-93a2395460b9}">
+		<Name>AdventurerGuild</Name>
+		<DisplayName lang="en_US">Adventurers Guild</DisplayName>
+		<Description lang="en_US">
+			<Short>Adds an autonomous quest board for the kingdom's heroes.</Short>
+			<Long>Give your heroes new adventures and a chance to earn more gold. Build the Adventurers Guild for a rotating board of sixteen quest types: deliveries, monster hunts, exploration, escorts, guard duty, and more. Open the Guild when ready; heroes choose their work and return for the posted reward. Requires Majesty Mod Manager 0.3.6 or newer.</Long>
+		</Description>
+		<DataConfiguration>
+			<Dataset base="Any">
+				<Load>
+					<CAM>Data\adventurer_guild_textdata.cam</CAM>
+					<CAM>Data\adventurer_guild_maindata.cam</CAM>
+					<CAM>Data\adventurer_guild_interfacedata.cam</CAM>
+					<CAM>Data\adventurer_guild_audio.cam</CAM>
+					<CAM>Data\adventurer_guild_sounddesc.cam</CAM>
+					<Descriptions>Data\adventurer-guild-units.xml</Descriptions>
+					<GPL>
+						<Target>Data\Adventurer_Guild.bcd</Target>
+						<Source>GPL\Adventurer_Guild_Data.dat</Source>
+						<Source>GPL\Adventurer_Guild_Core.gpl</Source>
+						<Source>GPL\Adventurer_Guild_Activities.gpl</Source>
+					</GPL>
+				</Load>
+			</Dataset>
+		</DataConfiguration>
+	</Mod>
+</Majesty>

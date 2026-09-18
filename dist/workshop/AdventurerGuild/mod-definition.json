@@ -1,0 +1,95 @@
+{
+  "schema_version": 3,
+  "mod_id": "{f851817e-de04-4f5d-bb40-93a2395460b9}",
+  "internal_name": "AdventurerGuild",
+  "display_name": "Adventurers Guild",
+  "custom_buildings": [
+    {
+      "local_name": "AdventurerGuild",
+      "controller_base": "AP08",
+      "panel_resource_template": "AP08"
+    }
+  ],
+  "runtime_features": [
+    {
+      "type": "stock.hero-quest-lifecycle.v1",
+      "feature_key": "guild-quests",
+      "hero_scripts": [
+        "mx_adept",
+        "mx_barbarian",
+        "mx_cultist",
+        "mx_discord",
+        "mx_dwarf",
+        "mx_elf",
+        "mx_gnome",
+        "mx_healer",
+        "mx_monk",
+        "mx_paladin",
+        "mx_priestess",
+        "mx_ranger",
+        "mx_rogue",
+        "mx_solarus",
+        "mx_warrior",
+        "mx_wizard"
+      ],
+      "resume_callback_symbol": "Adventurer_Guild_Hero_Decision",
+      "consider_callback_symbol": "Adventurer_Guild_Hero_Consider",
+      "reset_callback_symbol": "Adventurer_Guild_Hero_Reset",
+      "death_callback_symbol": "Adventurer_Guild_Hero_Death"
+    },
+    {
+      "type": "stock.mx05-data-record-list-panel.v1",
+      "panel_key": "quest-board",
+      "parent_building": "AdventurerGuild",
+      "source_dialog_id": "AGQB",
+      "open_command_id": 28929,
+      "row_count_callback_symbol": "Adventurer_Guild_UI_Offer_Count",
+      "row_key_callback_symbol": "Adventurer_Guild_UI_Offer_Key",
+      "revision_callback_symbol": "Adventurer_Guild_UI_Revision",
+      "row_title_text": null,
+      "row_text": null,
+      "row_variant_callback_symbol": "Adventurer_Guild_UI_Offer_Variant",
+      "row_variants": [
+        {"title_text": "Royal Dispatch", "row_text": "Deliver royal orders"},
+        {"title_text": "Cleanse the Den", "row_text": "Destroy a hostile lair"},
+        {"title_text": "Monster Bounty", "row_text": "Defeat the marked monster"},
+        {"title_text": "Chart the Wilds", "row_text": "Explore uncharted territory"},
+        {"title_text": "Supply Run", "row_text": "Collect city supplies"},
+        {"title_text": "Lost Treasure", "row_text": "Find a hidden treasure chest"},
+        {"title_text": "Scout the Lair", "row_text": "Discover a hidden lair"},
+        {"title_text": "Border Patrol", "row_text": "Patrol two outposts"},
+        {"title_text": "Answer the Call", "row_text": "Complete a posted reward flag"},
+        {"title_text": "Watch My Back", "row_text": "Support a hero for one day"},
+        {"title_text": "Caravan Guard", "row_text": "Escort a caravan to market"},
+        {"title_text": "Pest Control", "row_text": "Defeat three nearby pests"},
+        {"title_text": "Field Testing", "row_text": "Use two different potions"},
+        {"title_text": "Hold the Line", "row_text": "Guard for one day on duty"},
+        {"title_text": "Tournament Trial", "row_text": "Finish a tournament"},
+        {"title_text": "Trade Route Survey", "row_text": "Visit a post and its market"}
+      ],
+      "row_value_callback_symbol": "Adventurer_Guild_UI_Offer_Reward",
+      "row_value_suffix_text": " Gold",
+      "action_cost_callback_symbol": "Adventurer_Guild_UI_Refresh_Cost",
+      "action_callback_symbol": "Adventurer_Guild_UI_Refresh_After_Debit",
+      "stay_on_panel_after_action": true,
+      "focus_selected_row_on_click": false,
+      "action_agent_scope": "parent"
+    },
+    {
+      "type": "stock.mx22-building-open-toggle.v1",
+      "toggle_key": "accepting-quests",
+      "parent_building": "AdventurerGuild",
+      "open_command_id": 28944,
+      "close_command_id": 28945
+    },
+    {
+      "type": "stock.map-fog-query.v1"
+    },
+    {"type": "stock.gameplay-event-observer.v1", "feature_key": "guild-potions", "event": "potion-consumed", "callback_symbol": "Adventurer_Guild_Event_Potion"},
+    {"type": "stock.gameplay-event-observer.v1", "feature_key": "guild-flags", "event": "reward-flag-paid", "callback_symbol": "Adventurer_Guild_Event_Flag"},
+    {"type": "stock.gameplay-event-observer.v1", "feature_key": "guild-caravans", "event": "caravan-delivered", "callback_symbol": "Adventurer_Guild_Event_Caravan"},
+    {"type": "stock.gameplay-event-observer.v1", "feature_key": "guild-tournaments", "event": "tournament-completed", "callback_symbol": "Adventurer_Guild_Event_Tournament"},
+    {"type": "stock.activity-duration.v1", "feature_key": "guild-duty", "api_prefix": "Adventurer_Guild_Duty", "condition_callback_symbol": "Adventurer_Guild_Duty_Qualifies", "completion_callback_symbol": "Adventurer_Guild_Duty_Completed", "cancellation_callback_symbol": "Adventurer_Guild_Duty_Cancelled"},
+    {"type": "stock.movement-query.v1"}
+  ]
+}

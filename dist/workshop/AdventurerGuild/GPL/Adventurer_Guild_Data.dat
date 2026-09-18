@@ -1,0 +1,13 @@
+[AdventurerGuild1]
+	{Building
+		(type building)
+		(subtype xx)
+		(title Adventurer_Guild)
+		(Level 1)
+		(Visited_Script Adventurer_Guild_Visited)
+		(ActiveScript Adventurer_Guild_Poll)
+		(birthscript basic_birth)
+		(birthScript2 Adventurer_Guild_Birth)
+		(IGdeathscript Adventurer_Guild_Destroyed)
+	}
+[end]
