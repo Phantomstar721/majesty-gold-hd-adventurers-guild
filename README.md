@@ -6,8 +6,7 @@ Adventurers Guild adds a new building to **Majesty Gold HD**, with a rotating
 board of jobs for your kingdom's heroes. Deliver supplies, hunt dangerous
 monsters, scout the wilderness, escort travelers, or lend a hand around town.
 Heroes choose their own work and return to the Guild to collect their reward.
-The Guild includes custom building artwork, dedicated quest/open/close icons,
-and a voiced welcome when selected.
+The Guild includes custom building artwork and a dedicated generic quest system and list panel support.
 
 ## Getting started
 
