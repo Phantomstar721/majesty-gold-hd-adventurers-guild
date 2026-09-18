@@ -1,6 +1,6 @@
 # Adventurers Guild
 
-Give your heroes somewhere to find their next adventure—and earn the gold to pay for it.
+Give your heroes somewhere to find their next adventure and earn the gold to pay for it.
 
 Adventurers Guild adds a new building to **Majesty Gold HD**, with a rotating
 board of jobs for your kingdom's heroes. Deliver supplies, hunt dangerous
@@ -31,7 +31,7 @@ release before installing this mod.
 
 Use either the Workshop copy or a local copy, not both. Continue launching
 through the Manager while using this mod.
-For manual installation, use the packaged release ZIP—not GitHub's automatic
+For manual installation, use the packaged release ZIP, not GitHub's automatic
 **Source code** download.
 
 ## Running your Guild
