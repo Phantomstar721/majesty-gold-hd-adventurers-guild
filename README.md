@@ -42,7 +42,8 @@ For manual installation, use the packaged release ZIP, not GitHub's automatic
   support six distinct types.
 - **Refresh costs 500 treasury gold** and replaces all unclaimed offers.
   It does not cancel quests heroes have already accepted.
-- Up to **four quests** may be active at once, with one quest per hero.
+- There is **no Guild-wide limit** on active quests. Each hero may hold one
+  quest, and each offer can be claimed by only one hero.
 - Closing the Guild stops new pickups. Heroes already on quests may still
   finish and return for payment.
 - If a hero dies with an unfinished quest, it returns to the board when its

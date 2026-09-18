@@ -687,7 +687,6 @@ begin
 	if ($AgentInList(Hero, Guild's "AGApplicants") == False)
 		return False;
 	if (($Adventurer_Guild_Is_Open(Guild) == False) ||
-		($ListSize(Guild's "AGActiveQuests") >= 4) ||
 		($IsValidGamePiece(Hero's "AGAcceptedQuest")))
 		return False;
 	if ($Adventurer_Guild_Activity_Executable(Guild, Key, Hero) == False)

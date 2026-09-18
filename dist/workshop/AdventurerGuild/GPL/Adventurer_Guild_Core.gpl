@@ -2177,7 +2177,6 @@ begin
 			$Adventurer_Guild_Ensure_Guild_State(Guild);
 			if ($Adventurer_Guild_Is_Open(Guild))
 				if ($DistanceBetweenAgents(Hero, Guild) < #Fairgrounds_Attraction_Range)
-					if ($ListSize(Guild's "AGActiveQuests") < 4)
 				begin
 					Quest = $Adventurer_Guild_Best_Offer(Guild, Hero);
 					if ($IsValidGamePiece(Quest))
@@ -2453,8 +2452,6 @@ begin
 	if ($UnitsAreSamePlayer(Hero, Guild) == False)
 		return False;
 	if ($AgentInList(Quest, Guild's "AGAvailableQuests") == False)
-		return False;
-	if ($ListSize(Guild's "AGActiveQuests") >= 4)
 		return False;
 	if ($IsValidGamePiece(Hero's "AGAcceptedQuest"))
 		return False;
