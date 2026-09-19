@@ -200,6 +200,105 @@ begin
 	return $Adventurer_Guild_Support_Target_From_Rates(Guild, Heroes, NormalRates, Ceiling, BusyTargets);
 end
 
+
+
+
+function Adventurer_Guild_Support_Adventuring(agent Target) is boolean
+declare
+	agent Objective, Flag, Quest;
+	integer Kind;
+begin
+	if ($IsValidGamePiece(Target) == False)
+		return False;
+	if (($InsideBuilding(Target)) || ($HasLowHP(Target)))
+		return False;
+	if ((Target's "ActiveScript" == $Use_Building) ||
+		(Target's "ActiveScript" == $Use_Building_Safe) ||
+		(Target's "ActiveScript" == $Travel_To_Safe))
+		return False;
+	if (Target's "ActiveScript" == $Travel_To)
+		if ((Target's "BackScript" == $Use_Building) ||
+			(Target's "BackScript" == $Use_Building_Safe))
+			return False;
+	if (Target's "ActiveScript" == $Travel_To_Exp)
+		return True;
+	if ((Target's "ActiveScript" == $Attack_Object) ||
+		((Target's "ActiveScript" == $Travel_To) &&
+		(Target's "BackScript" == $Attack_Object)))
+		begin
+			Objective = Target's "Target";
+			if ($IsValidGamePiece(Objective) == False)
+				return False;
+			if ($IsDead(Objective))
+				return False;
+			return ($GetPlayerTeamNumber(Target) != $GetPlayerTeamNumber(Objective));
+		end
+	if ((Target's "ActiveScript" != $Travel_To) || (Target's "Target" != Target))
+		return False;
+
+	if (Target's "BackScript" == Target's "BasicScript")
+		begin
+			Flag = $Parent(Target);
+			if ($IsValidGamePiece(Flag))
+				if ((Flag's "type" == "RewardFlag") && (Flag's "title" == "flag_explore"))
+					if (($IsDead(Flag) == False) && $UnitsAreSamePlayer(Target, Flag))
+						return $AgentInList(Target, Flag's "heroes");
+		end
+
+
+	if (Target's "BackScript" == $Adventurer_Guild_Dispatch_Outbound)
+		if ($HasAttribute("AGAcceptedQuest", Target))
+			begin
+				Quest = Target's "AGAcceptedQuest";
+				if ($IsValidGamePiece(Quest))
+					if ((Quest's "AGClaimant" == Target) && (Quest's "AGObjectiveComplete" == False))
+						begin
+							Kind = Quest's "AGQuestKind";
+							return ((Kind == 4) || (Kind == 7) || (Kind == 8));
+						end
+			end
+	return False;
+end
+
+function Adventurer_Guild_Support_Claim_Target(agent Guild, agent Hero, agent Original) is agent
+declare
+	list Heroes, BusyTargets, OfferedTargets, Candidates, Preferred;
+	agent Candidate;
+	integer FollowerRate, TargetRate, Ceiling;
+	boolean OriginalEligible;
+begin
+	if ($Adventurer_Guild_Support_Hero_Valid(Guild, Hero) == False)
+		return $NullAgent();
+	FollowerRate = $MM_UnitMovementRate(Hero, 0);
+	Ceiling = $Adventurer_Guild_Support_Speed_Ceiling();
+	if ((FollowerRate <= 0) || (Ceiling <= 0))
+		return $NullAgent();
+	BusyTargets = $Adventurer_Guild_Support_Busy_Targets(Guild, False);
+	OfferedTargets = $Adventurer_Guild_Support_Busy_Targets(Guild, True);
+	$ListObjects(Guild, "hero", -1, Heroes, #MyPlayer);
+	OriginalEligible = False;
+	foreach Candidate in Heroes do
+		if ($Adventurer_Guild_Support_Hero_Valid(Guild, Candidate))
+			if ((Candidate != Hero) && ($AgentInList(Candidate, BusyTargets) == False))
+				if ((Candidate == Original) || ($AgentInList(Candidate, OfferedTargets) == False))
+					begin
+						TargetRate = $MM_UnitMovementRate(Candidate, 0);
+						if ($Adventurer_Guild_Support_Rates_Compatible(FollowerRate, TargetRate, Ceiling))
+							begin
+								Candidates << Candidate;
+								if (Candidate == Original)
+									OriginalEligible = True;
+								if ($Adventurer_Guild_Support_Adventuring(Candidate))
+									Preferred << Candidate;
+							end
+					end
+	if ($ListSize(Preferred) > 0)
+		return $pick_closest(Guild, Preferred);
+	if (OriginalEligible)
+		return Original;
+	return $pick_closest(Guild, Candidates);
+end
+
 function Adventurer_Guild_Activities_Ready(integer Kind) is boolean
 declare
 begin
@@ -677,7 +776,8 @@ end
 
 function Adventurer_Guild_Activity_Claim(agent Guild, agent Hero) is boolean
 declare
-	integer Key, Index, Token;
+	integer Key, Index, Token, Kind;
+	agent Target;
 	list Empty;
 begin
 	$Adventurer_Guild_Activity_Ensure_Hero(Hero);
@@ -689,8 +789,26 @@ begin
 	if (($Adventurer_Guild_Is_Open(Guild) == False) ||
 		($IsValidGamePiece(Hero's "AGAcceptedQuest")))
 		return False;
-	if ($Adventurer_Guild_Activity_Executable(Guild, Key, Hero) == False)
+	Index = $Adventurer_Guild_Activity_Index(Guild, Key);
+	if (Index == 0)
 		return False;
+	Kind = $ListMember(Guild's "AGXKinds", Index);
+	Target = $Adventurer_Guild_Activity_Target(Guild, Key, 1);
+	if (Kind == 10)
+		begin
+
+
+			if ($Adventurer_Guild_Activity_Reserved(Guild, Key, Hero))
+				return False;
+			if ($Adventurer_Guild_Activities_Ready(Kind) == False)
+				return False;
+			Target = $Adventurer_Guild_Support_Claim_Target(Guild, Hero, Target);
+			if ($IsValidGamePiece(Target) == False)
+				return False;
+		end
+	else
+		if ($Adventurer_Guild_Activity_Executable(Guild, Key, Hero) == False)
+			return False;
 
 
 	Token = Hero's "AGXNextClaimToken";
@@ -700,15 +818,14 @@ begin
 		Hero's "AGXNextClaimToken" = 0;
 	else
 		Hero's "AGXNextClaimToken" += 1;
-	Index = $Adventurer_Guild_Activity_Index(Guild, Key);
-	Hero's "AGQuestKind" = $ListMember(Guild's "AGXKinds", Index);
+	Hero's "AGQuestKind" = Kind;
 	Hero's "AGReward" = $ListMember(Guild's "AGXRewards", Index);
 	Hero's "AGRowKey" = Key;
 	Hero's "AGXClaimToken" = Token;
 	Hero's "AGGuild" = Guild;
 	Hero's "AGClaimant" = Hero;
 	Hero's "AGApplicant" = $NullAgent();
-	Hero's "AGDestination" = $Adventurer_Guild_Activity_Target(Guild, Key, 1);
+	Hero's "AGDestination" = Target;
 	Hero's "AGDestination2" = $Adventurer_Guild_Activity_Target(Guild, Key, 2);
 	Hero's "AGDestination3" = $Adventurer_Guild_Activity_Target(Guild, Key, 3);
 	Hero's "AGStage" = 0;

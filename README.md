@@ -88,8 +88,11 @@ economic buildings. Border Patrol can use Guardhouses, Ballista Towers,
 Wizard Towers, Dwarven Settlements, and Outposts that are not acting as the castle.
 
 Watch My Back pairs a faster follower with a slower target and prevents
-simultaneous support assignments to the same hero. Guard and support duty
-count qualifying time, not time spent fleeing or away recovering.
+simultaneous support assignments to the same hero. At pickup, it prefers a hero
+currently exploring or fighting over one resting or visiting buildings. If none
+qualify, it keeps the original eligible target or chooses another eligible hero.
+Speed and ownership requirements still apply to every fallback. Guard and support
+duty count qualifying time, not time spent fleeing or away recovering.
 
 Field Testing becomes available when a potential hero has two distinct
 qualifying potion sources. Healing potions must already be carried; eligible
